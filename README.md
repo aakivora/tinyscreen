@@ -1,6 +1,6 @@
 # tiny-screen
 
-A "smart display" for a Raspberry Pi Zero 2 W driving an Adafruit 64x64 RGB LED matrix panel. Built and fully tested against a software emulator ([RGBMatrixEmulator](https://github.com/ty-porter/RGBMatrixEmulator)) before any hardware existed — the same code runs unmodified on the real panel once it's plugged in, by flipping one environment variable.
+A "smart display" for a Raspberry Pi Zero W driving an Adafruit 64x64 RGB LED matrix panel. Built and fully tested against a software emulator ([RGBMatrixEmulator](https://github.com/ty-porter/RGBMatrixEmulator)) before any hardware existed — the same code runs unmodified on the real panel once it's plugged in, by flipping one environment variable.
 
 Inspired by [mewtru's "How to Build a Tiny Screen for Spotify"](https://www.youtube.com/watch?v=Imc0zfjhUTw) and [tnarla/spotify-matrix](https://github.com/tnarla/spotify-matrix), extended with a generated weather/art idle mode and full Spotify OAuth + auto mode-switching.
 
@@ -13,7 +13,7 @@ Two modes, switching automatically:
 
 ## Status
 
-Software is complete and verified in the emulator. Hardware (Pi Zero 2 W + Adafruit RGB Matrix Bonnet + 64x64 panel) hasn't arrived yet — `tinyscreen/display.py` is the one file that will need real-hardware tuning (`gpio_slowdown`, `brightness`, etc.) once it does, everything else should just work.
+Software is complete and verified in the emulator. Hardware bring-up is in progress: the Pi is flashed, networked, and has `rgbmatrix` built from source; the bonnet is soldered and attached next, followed by the first real-hardware test (tuning `gpio_slowdown`/`brightness` in `tinyscreen/display.py` as needed).
 
 ## Requirements
 
@@ -28,13 +28,20 @@ Software is complete and verified in the emulator. Hardware (Pi Zero 2 W + Adafr
 # Install uv if you don't have it (single binary, no sudo, doesn't touch system Python)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Install project dependencies (uv also downloads Python 3.12 itself if needed)
+# On your dev machine (Mac/etc.), running against the software emulator:
+uv sync --extra emulator
+
+# On real Raspberry Pi hardware, running against the real rgbmatrix library
+# (built separately from source - see "Requirements" above), skip the
+# `emulator` extra entirely:
 uv sync
 
 cp .env.example .env
 ```
 
-Edit `.env` with your weather/Spotify credentials (see comments in the file — everything is optional and degrades gracefully without it). At minimum, `TINYSCREEN_DISPLAY_BACKEND=emulator` should already be set so it runs against the software emulator.
+`RGBMatrixEmulator` is deliberately an optional extra, not a base dependency — it's only needed for the software emulator, and its `numpy` dependency can be slow or impractical to build from source on constrained hardware like the original Pi Zero's ARMv6 chip. Plain `uv sync` skips it entirely, which is what you want on real hardware.
+
+Edit `.env` with your weather/Spotify credentials (see comments in the file — everything is optional and degrades gracefully without it). At minimum, `TINYSCREEN_DISPLAY_BACKEND=emulator` should already be set so it runs against the software emulator (on real hardware, set this to `hardware` instead).
 
 ### Idle-mode art
 

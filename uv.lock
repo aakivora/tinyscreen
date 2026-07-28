@@ -338,6 +338,10 @@ dependencies = [
     { name = "pillow" },
     { name = "python-dotenv" },
     { name = "requests" },
+]
+
+[package.optional-dependencies]
+emulator = [
     { name = "rgbmatrixemulator" },
 ]
 
@@ -352,8 +356,9 @@ requires-dist = [
     { name = "pillow", specifier = ">=10.0.0,<12.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0,<2.0.0" },
     { name = "requests", specifier = ">=2.31.0,<3.0.0" },
-    { name = "rgbmatrixemulator", specifier = ">=0.19.0,<1.0.0" },
+    { name = "rgbmatrixemulator", marker = "extra == 'emulator'", specifier = ">=0.19.0,<1.0.0" },
 ]
+provides-extras = ["emulator"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=7.4.0,<9.0.0" }]

@@ -5,10 +5,23 @@ description = "Smart display for a Raspberry Pi + RGB LED matrix: scrolling weat
 requires-python = ">=3.12"
 dependencies = [
     "Pillow>=10.0.0,<12.0.0",
-    "RGBMatrixEmulator>=0.19.0,<1.0.0",
     "requests>=2.31.0,<3.0.0",
     "beautifulsoup4>=4.12.0,<5.0.0",
     "python-dotenv>=1.0.0,<2.0.0",
+]
+
+# RGBMatrixEmulator is only needed for local development against the software
+# emulator (Mac). Real hardware uses the `rgbmatrix` library instead, built
+# from source directly on the Pi (see tinyscreen/display.py) - not a pip
+# package at all, so it's not listed here either way. Keeping
+# RGBMatrixEmulator out of the base dependency set means `uv sync` on
+# constrained/uncommon-architecture hardware (e.g. the original Pi Zero's
+# ARMv6 chip) never has to build RGBMatrixEmulator's numpy dependency from
+# source, which is slow-to-impossible on that hardware and is never actually
+# needed there.
+[project.optional-dependencies]
+emulator = [
+    "RGBMatrixEmulator>=0.19.0,<1.0.0",
 ]
 
 [dependency-groups]
