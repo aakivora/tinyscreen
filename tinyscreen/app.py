@@ -25,7 +25,10 @@ from datetime import datetime
 
 from tinyscreen.config import Settings
 from tinyscreen.display import create_matrix, push_frame
+from tinyscreen.fonts import get_font
 from tinyscreen.renderer import (
+    TEXT_FONT_SIZE,
+    VERTICAL_FONT_SIZE,
     build_scroll_strip,
     build_vertical_scroll_strip,
     color_for_category,
@@ -44,6 +47,16 @@ WEATHER_RETRY_SECONDS = 5.0  # only used when we have no weather at all yet
 
 def run(settings: Settings) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+    # Load (and lru_cache) both font sizes before touching the matrix
+    # hardware. On real hardware, rgbmatrix's initialization locks memory
+    # for jitter-free GPIO timing, which breaks subsequent font-file opens
+    # in the same process (confirmed empirically: font loading alone works,
+    # matrix init alone works, matrix-then-font reliably fails with "cannot
+    # open resource"). Loading fonts first means they're already cached by
+    # the time that happens, so nothing needs to touch the file afterward.
+    get_font(settings.font_path, TEXT_FONT_SIZE)
+    get_font(settings.font_path, VERTICAL_FONT_SIZE)
 
     matrix = create_matrix(settings)
     canvas = matrix.CreateFrameCanvas()
