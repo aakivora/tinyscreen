@@ -31,3 +31,13 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+
+# Without this, setuptools' automatic package discovery sees both assets/
+# (fonts/art, not Python code) and tinyscreen/ at the top level and refuses
+# to guess which one is "the package" - surfaces as a `pip install -e .`
+# failure ("Multiple top-level packages discovered in a flat-layout").
+# uv sync tolerates the ambiguity, but plain pip (needed on real hardware,
+# see tinyscreen/display.py, since rgbmatrix's build installs into its own
+# venv outside uv's management) enforces it strictly.
+[tool.setuptools.packages.find]
+include = ["tinyscreen*"]
