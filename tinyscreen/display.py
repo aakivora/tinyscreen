@@ -132,6 +132,19 @@ def build_matrix_options(settings: MatrixSettings) -> Any:
     # this project has no audio output.
     options.disable_hardware_pulsing = settings.disable_hardware_pulsing
 
+    if settings.display_backend == "hardware":
+        # By default, once the matrix has grabbed the root-only GPIO access
+        # it needs, the library drops root privileges and switches the
+        # process to the "daemon" user for the rest of its life - a sensible
+        # security default in general, but it means daemon then can't read
+        # (or write back refreshed tokens to) anything under our actual
+        # user's home directory, like the Spotify token cache - Debian home
+        # directories are typically 750 (owner+group only, no "other"
+        # access). Rather than chase down permissions on every file/dir this
+        # process ever touches, just stay root for the process's lifetime -
+        # a reasonable tradeoff for a personal device on your own network.
+        options.drop_privileges = False
+
     return options
 
 
