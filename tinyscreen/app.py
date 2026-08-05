@@ -1,16 +1,22 @@
 """The main render loop: idle-mode scrolling sentence, or Spotify now-playing
 when something's actively playing.
 
+The render loop itself only ever does cheap, local work (compute a scroll
+offset, crop a pre-built strip, push a frame) - it never blocks on a network
+call. Weather and Spotify polling both run on their own background threads,
+each updating a small shared state dict under a lock; the render loop just
+reads whatever's currently there. This matters because both APIs are
+genuinely slow sometimes (a few hundred ms to a couple seconds), and earlier
+versions of this loop called them directly inline - which meant every poll
+(every 5s for Spotify) froze the on-panel scroll animation for the duration
+of the HTTP request, a visible stutter that was very noticeable on real
+hardware.
+
 Runs at a fixed frame interval (not a once-a-second tick) since both modes
 need smooth scroll animation. Scroll position in both modes is computed from
 *elapsed wall-clock time*, not "add N pixels every frame" - that keeps
-speed accurate even if a frame is delayed (e.g. by an HTTP call), instead of
-the animation stuttering to catch up.
-
-Content refresh happens on its own, much-slower cadence per mode
-(settings.weather_poll_interval_seconds, settings.spotify_poll_interval_seconds)
-- both because their APIs don't need/want polling every frame, and because
-changing content mid-scroll would be a jarring visual glitch.
+speed accurate even if a frame is delayed, instead of the animation
+stuttering to catch up.
 
 Idle-mode content keeps refreshing on its own schedule even while Spotify
 mode is active, so falling back to idle is instant rather than needing to
@@ -20,6 +26,7 @@ mode is active, so falling back to idle is instant rather than needing to
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from datetime import datetime
 
@@ -36,9 +43,9 @@ from tinyscreen.renderer import (
     vertical_scroll_frame,
 )
 from tinyscreen.sentence import generate_sentence
-from tinyscreen.spotify_client import NowPlaying, build_spotify_client, should_show_spotify
+from tinyscreen.spotify_client import build_spotify_client, should_show_spotify
 from tinyscreen.spotify_renderer import build_ticker_strip, compose_now_playing_frame, download_album_art
-from tinyscreen.weather import WeatherReading, build_weather_client
+from tinyscreen.weather import build_weather_client
 
 logger = logging.getLogger("tinyscreen")
 
@@ -75,85 +82,108 @@ def run(settings: Settings) -> None:
         "enabled" if spotify_client else "disabled",
     )
 
-    # Idle-mode state.
-    weather: WeatherReading | None = None
-    last_weather_poll = 0.0
-    idle_strip = None
-    idle_strip_started_at = 0.0
+    state_lock = threading.Lock()
+    stop_event = threading.Event()
 
-    # Spotify-mode state.
-    last_spotify_poll = 0.0
-    last_playing_at: float | None = None
-    current_now_playing: NowPlaying | None = None
-    spotify_art_image = None
-    spotify_ticker_strip = None
-    spotify_strip_started_at = 0.0
+    idle_state = {"strip": None, "strip_started_at": 0.0}
+    spotify_state = {
+        "current_now_playing": None,
+        "is_playing": False,
+        "last_playing_at": None,
+        "art_image": None,
+        "ticker_strip": None,
+        "strip_started_at": 0.0,
+    }
+
+    def poll_weather() -> None:
+        while not stop_event.is_set():
+            try:
+                weather = weather_client.fetch()
+                generated = generate_sentence(weather, datetime.now())
+                logger.info("New sentence [%s]: %s", generated.category, generated.text)
+                color = color_for_category(generated.category)
+                strip = build_idle_strip(generated.text, settings.font_path, color=color)
+                with state_lock:
+                    idle_state["strip"] = strip
+                    idle_state["strip_started_at"] = time.monotonic()
+                wait_seconds = settings.weather_poll_interval_seconds
+            except Exception:
+                logger.exception("Weather fetch / sentence generation failed")
+                # Only retry quickly if we have nothing to show at all yet -
+                # once there's a strip on screen, a transient failure just
+                # means "try again next normal cycle" rather than hammering
+                # the API.
+                with state_lock:
+                    have_strip = idle_state["strip"] is not None
+                wait_seconds = settings.weather_poll_interval_seconds if have_strip else WEATHER_RETRY_SECONDS
+            stop_event.wait(wait_seconds)
+
+    def poll_spotify() -> None:
+        while not stop_event.is_set():
+            try:
+                now_playing = spotify_client.get_currently_playing()
+            except Exception:
+                logger.exception("Spotify poll failed")
+                now_playing = None
+
+            with state_lock:
+                previous = spotify_state["current_now_playing"]
+
+            is_playing = now_playing is not None
+            if is_playing:
+                track_changed = previous is None or now_playing.track_id != previous.track_id
+                if track_changed:
+                    logger.info(
+                        "Now playing: %s - %s", now_playing.track_name, now_playing.artist_name
+                    )
+                    try:
+                        art_image = download_album_art(now_playing.album_art_url)
+                        ticker_strip = build_ticker_strip(
+                            now_playing.track_name, now_playing.artist_name, settings.font_path
+                        )
+                        with state_lock:
+                            spotify_state["art_image"] = art_image
+                            spotify_state["ticker_strip"] = ticker_strip
+                            spotify_state["strip_started_at"] = time.monotonic()
+                    except Exception:
+                        logger.exception("Failed to download album art")
+                        is_playing = False  # can't show Spotify mode without art
+
+            with state_lock:
+                spotify_state["current_now_playing"] = now_playing
+                spotify_state["is_playing"] = is_playing
+                if is_playing:
+                    spotify_state["last_playing_at"] = time.monotonic()
+
+            stop_event.wait(settings.spotify_poll_interval_seconds)
+
+    threading.Thread(target=poll_weather, daemon=True).start()
+    if spotify_client is not None:
+        threading.Thread(target=poll_spotify, daemon=True).start()
+
     current_mode = "idle"
 
     try:
         while True:
-            now = datetime.now()
+            with state_lock:
+                idle_strip = idle_state["strip"]
+                idle_strip_started_at = idle_state["strip_started_at"]
+                spotify_is_playing = spotify_state["is_playing"]
+                spotify_last_playing_at = spotify_state["last_playing_at"]
+                spotify_art_image = spotify_state["art_image"]
+                spotify_ticker_strip = spotify_state["ticker_strip"]
+                spotify_strip_started_at = spotify_state["strip_started_at"]
+
             monotonic_now = time.monotonic()
 
-            # --- idle-mode content refresh (always runs, any mode) ---
-            elapsed_since_weather_poll = monotonic_now - last_weather_poll
-            if weather is None or elapsed_since_weather_poll >= settings.weather_poll_interval_seconds:
-                try:
-                    weather = weather_client.fetch()
-                    last_weather_poll = time.monotonic()
-                    generated = generate_sentence(weather, now)
-                    logger.info("New sentence [%s]: %s", generated.category, generated.text)
-                    color = color_for_category(generated.category)
-                    idle_strip = build_idle_strip(generated.text, settings.font_path, color=color)
-                    idle_strip_started_at = time.monotonic()
-                except Exception:
-                    logger.exception("Weather fetch / sentence generation failed")
-                    if idle_strip is None:
-                        # Nothing to show at all yet - wait and retry rather
-                        # than crash on a transient network hiccup.
-                        time.sleep(WEATHER_RETRY_SECONDS)
-                        continue
-
-            # --- spotify polling ---
-            is_playing = current_now_playing is not None
-            if spotify_client is not None:
-                elapsed_since_spotify_poll = monotonic_now - last_spotify_poll
-                if elapsed_since_spotify_poll >= settings.spotify_poll_interval_seconds:
-                    last_spotify_poll = time.monotonic()
-                    try:
-                        now_playing = spotify_client.get_currently_playing()
-                    except Exception:
-                        logger.exception("Spotify poll failed")
-                        now_playing = None
-
-                    is_playing = now_playing is not None
-                    if is_playing:
-                        last_playing_at = time.monotonic()
-                        track_changed = (
-                            current_now_playing is None
-                            or now_playing.track_id != current_now_playing.track_id
-                        )
-                        if track_changed:
-                            logger.info(
-                                "Now playing: %s - %s", now_playing.track_name, now_playing.artist_name
-                            )
-                            try:
-                                spotify_art_image = download_album_art(now_playing.album_art_url)
-                                spotify_ticker_strip = build_ticker_strip(
-                                    now_playing.track_name, now_playing.artist_name, settings.font_path
-                                )
-                                spotify_strip_started_at = time.monotonic()
-                            except Exception:
-                                logger.exception("Failed to download album art")
-                                is_playing = False  # can't show Spotify mode without art
-                    current_now_playing = now_playing
-
-            # --- mode decision ---
             show_spotify = (
                 spotify_client is not None
                 and spotify_art_image is not None
                 and should_show_spotify(
-                    is_playing, last_playing_at, monotonic_now, settings.spotify_fallback_seconds
+                    spotify_is_playing,
+                    spotify_last_playing_at,
+                    monotonic_now,
+                    settings.spotify_fallback_seconds,
                 )
             )
             new_mode = "spotify" if show_spotify else "idle"
@@ -180,4 +210,5 @@ def run(settings: Settings) -> None:
     except KeyboardInterrupt:
         logger.info("Shutting down")
     finally:
+        stop_event.set()
         matrix.Clear()
