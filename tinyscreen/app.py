@@ -44,7 +44,12 @@ from tinyscreen.renderer import (
 )
 from tinyscreen.sentence import generate_sentence
 from tinyscreen.spotify_client import build_spotify_client, should_show_spotify
-from tinyscreen.spotify_renderer import build_ticker_strip, compose_now_playing_frame, download_album_art
+from tinyscreen.spotify_renderer import (
+    build_ticker_strip,
+    compose_now_playing_frame,
+    download_album_art,
+    pick_ticker_text_color,
+)
 from tinyscreen.weather import build_weather_client
 
 logger = logging.getLogger("tinyscreen")
@@ -92,6 +97,7 @@ def run(settings: Settings) -> None:
         "last_playing_at": None,
         "art_image": None,
         "ticker_strip": None,
+        "text_color": (255, 255, 255),
         "strip_started_at": 0.0,
     }
 
@@ -138,12 +144,14 @@ def run(settings: Settings) -> None:
                     )
                     try:
                         art_image = download_album_art(now_playing.album_art_url)
+                        text_color = pick_ticker_text_color(art_image)
                         ticker_strip = build_ticker_strip(
                             now_playing.track_name, now_playing.artist_name, settings.font_path
                         )
                         with state_lock:
                             spotify_state["art_image"] = art_image
                             spotify_state["ticker_strip"] = ticker_strip
+                            spotify_state["text_color"] = text_color
                             spotify_state["strip_started_at"] = time.monotonic()
                     except Exception:
                         logger.exception("Failed to download album art")
@@ -172,6 +180,7 @@ def run(settings: Settings) -> None:
                 spotify_last_playing_at = spotify_state["last_playing_at"]
                 spotify_art_image = spotify_state["art_image"]
                 spotify_ticker_strip = spotify_state["ticker_strip"]
+                spotify_text_color = spotify_state["text_color"]
                 spotify_strip_started_at = spotify_state["strip_started_at"]
 
             monotonic_now = time.monotonic()
@@ -195,7 +204,9 @@ def run(settings: Settings) -> None:
                 offset_px = int(
                     (time.monotonic() - spotify_strip_started_at) * settings.scroll_speed_px_per_sec
                 )
-                frame = compose_now_playing_frame(spotify_art_image, spotify_ticker_strip, offset_px)
+                frame = compose_now_playing_frame(
+                    spotify_art_image, spotify_ticker_strip, offset_px, text_color=spotify_text_color
+                )
             else:
                 if idle_strip is None:
                     time.sleep(settings.frame_interval_seconds)

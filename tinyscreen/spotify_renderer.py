@@ -16,7 +16,7 @@ from __future__ import annotations
 from io import BytesIO
 
 import requests
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageStat
 
 from tinyscreen.renderer import CANVAS_SIZE, TEXT_COLOR, build_scroll_strip, scroll_frame
 
@@ -53,14 +53,40 @@ def _fit_album_art(art_image: Image.Image) -> Image.Image:
     return ImageOps.fit(art_image, (CANVAS_SIZE, CANVAS_SIZE), Image.LANCZOS, centering=(0.5, 0.5))
 
 
+def pick_ticker_text_color(art_image: Image.Image) -> tuple[int, int, int]:
+    """White text on a dark background, black text on a light one - checked
+    against the average brightness of the album art specifically where the
+    ticker sits (the bottom band), not the whole cover, since that's the
+    only part the text actually overlaps. Call once per track change
+    alongside build_ticker_strip, not per frame - the art doesn't change
+    color mid-scroll, so there's no need to recompute this every frame.
+    """
+    fitted = _fit_album_art(art_image)
+    bottom_band = fitted.crop((0, CANVAS_SIZE - TICKER_HEIGHT, CANVAS_SIZE, CANVAS_SIZE))
+    brightness = ImageStat.Stat(bottom_band.convert("L")).mean[0]
+    return (0, 0, 0) if brightness > 128 else TEXT_COLOR
+
+
 def build_ticker_strip(track_name: str, artist_name: str, font_path) -> Image.Image:
     """Call once per track change - see compose_now_playing_frame for the
-    cheap per-frame half of this split."""
+    cheap per-frame half of this split.
+
+    Always drawn in TEXT_COLOR (white) regardless of what color the text
+    will actually be displayed in - this strip only exists to answer "which
+    pixels are glyphs", via a brightness threshold against its own black
+    background. That threshold breaks if the glyphs themselves are drawn
+    black (nothing to threshold - background and text are both 0), so the
+    actual display color gets applied separately, at composite time -
+    see compose_now_playing_frame's text_color argument.
+    """
     return build_scroll_strip(f"{track_name} - {artist_name}", font_path, color=TEXT_COLOR)
 
 
 def compose_now_playing_frame(
-    art_image: Image.Image, ticker_strip: Image.Image, offset_px: int
+    art_image: Image.Image,
+    ticker_strip: Image.Image,
+    offset_px: int,
+    text_color: tuple[int, int, int] = TEXT_COLOR,
 ) -> Image.Image:
     frame = _fit_album_art(art_image)
 
@@ -71,10 +97,12 @@ def compose_now_playing_frame(
     ticker_frame = scroll_frame(ticker_strip, offset_px)
     band = ticker_frame.crop((0, band_top, CANVAS_SIZE, band_top + TICKER_HEIGHT))
 
-    # Paste only the ticker's text pixels (not its black background) directly
-    # over the album art, no dimming - lets the full art show through behind
-    # the text rather than sitting under a darkened bar.
+    # `band` is always white-on-black (see build_ticker_strip), so this
+    # threshold reliably finds the glyph pixels regardless of what color
+    # they'll actually be painted - a solid-color rect gets stamped through
+    # that shape directly onto the art, no dimming behind it.
     text_mask = band.convert("L").point(lambda pixel: 255 if pixel > 40 else 0)
-    frame.paste(band, (0, CANVAS_SIZE - TICKER_HEIGHT), text_mask)
+    colored_text = Image.new("RGB", (CANVAS_SIZE, TICKER_HEIGHT), text_color)
+    frame.paste(colored_text, (0, CANVAS_SIZE - TICKER_HEIGHT), text_mask)
 
     return frame

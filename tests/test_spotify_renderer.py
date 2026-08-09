@@ -5,7 +5,12 @@ from unittest.mock import MagicMock, patch
 from PIL import Image
 
 from tinyscreen.renderer import CANVAS_SIZE
-from tinyscreen.spotify_renderer import build_ticker_strip, compose_now_playing_frame, download_album_art
+from tinyscreen.spotify_renderer import (
+    build_ticker_strip,
+    compose_now_playing_frame,
+    download_album_art,
+    pick_ticker_text_color,
+)
 
 FONT_PATH = Path(__file__).resolve().parent.parent / "assets" / "fonts" / "Silkscreen-Regular.ttf"
 
@@ -33,6 +38,32 @@ def test_compose_now_playing_frame_handles_non_square_art():
     frame = compose_now_playing_frame(art, ticker, offset_px=25)
 
     assert frame.size == (CANVAS_SIZE, CANVAS_SIZE)
+
+
+def test_pick_ticker_text_color_is_black_on_light_art():
+    light_art = Image.new("RGB", (300, 300), (230, 210, 60))
+    assert pick_ticker_text_color(light_art) == (0, 0, 0)
+
+
+def test_pick_ticker_text_color_is_white_on_dark_art():
+    dark_art = Image.new("RGB", (300, 300), (20, 25, 45))
+    assert pick_ticker_text_color(dark_art) == (255, 255, 255)
+
+
+def test_compose_now_playing_frame_black_text_is_actually_visible():
+    # Regression test: an earlier version generated the ticker strip itself
+    # in the target display color, which silently broke black text - the
+    # mask threshold that finds "which pixels are glyphs" compared strip
+    # brightness against the strip's own black background, so black-on-black
+    # glyphs were indistinguishable from background and the mask found
+    # nothing at all. Confirm black text actually produces black pixels
+    # somewhere in the rendered frame, not just "doesn't crash".
+    art = Image.new("RGB", (300, 300), (230, 210, 60))  # light art
+    ticker = build_ticker_strip("Some Song", "Some Artist", FONT_PATH)
+
+    frame = compose_now_playing_frame(art, ticker, offset_px=0, text_color=(0, 0, 0))
+
+    assert (0, 0, 0) in set(frame.getdata())
 
 
 def test_download_album_art_returns_rgb_image():
