@@ -29,10 +29,15 @@ TICKER_HEIGHT = 16
 TICKER_VERTICAL_SHIFT = 3
 
 TICKER_CYCLE_SECONDS = 60.0  # how often the ticker scrolls through - see compute_ticker_offset
-# Static readable pause before the *first* scroll of a track only - see
-# compute_ticker_offset. Held at .5s less than the original 2.0s: on real
-# hardware even 2s read as a bit sluggish once you knew what was coming.
-TICKER_HOLD_SECONDS = 1.5
+# Static readable pause before a track's *first* scroll - longer than the
+# repeat hold below since this is most people's only chance to read the
+# title before it starts moving.
+TICKER_HOLD_SECONDS = 0.9
+# Shorter pause before every scroll *after* the first for the same track -
+# a full-length hold on every repeat read as an odd stutter once you'd
+# already seen the title once, but dropping it to zero made the repeat
+# scroll start moving too abruptly.
+TICKER_REPEAT_HOLD_SECONDS = 0.2
 
 
 def compute_ticker_offset(
@@ -41,17 +46,19 @@ def compute_ticker_offset(
     scroll_speed_px_per_sec: float,
     cycle_seconds: float = TICKER_CYCLE_SECONDS,
     hold_seconds: float = TICKER_HOLD_SECONDS,
+    repeat_hold_seconds: float = TICKER_REPEAT_HOLD_SECONDS,
 ) -> int | None:
     """Hold the ticker static at its start (fully readable, offset 0) for
-    `hold_seconds` exactly once - the very first scroll after `elapsed_seconds`
-    starts counting from a track change - then scroll it through, then show
-    nothing at all (just the album art, no text) for the rest of
-    `cycle_seconds`, then repeat the scroll-then-blank cycle with no further
-    holds. A typical 2-4 minute track then shows the title/artist 2-4 times
+    `hold_seconds` before a track's first scroll, then scroll it through,
+    then show nothing at all (just the album art, no text) for the rest of
+    `cycle_seconds`, then repeat - holding for the shorter `repeat_hold_seconds`
+    before each later scroll of the same track rather than `hold_seconds`
+    again. A typical 2-4 minute track then shows the title/artist 2-4 times
     total instead of continuously - less visual clutter for something you're
-    not actively trying to read start to finish, per request. The hold is
-    once-only per request: repeating it on every cycle read as an odd stutter
-    once you'd already seen the title once.
+    not actively trying to read start to finish, per request. The two
+    separate hold lengths exist because a full-length hold on every repeat
+    read as an odd stutter once you'd already seen the title once, but no
+    hold at all on repeats made them start moving too abruptly.
 
     The hold exists because without it, a new track's ticker starts moving
     the instant it's built - on real hardware, by the time you actually
@@ -62,7 +69,7 @@ def compute_ticker_offset(
 
     Returns None during the blank phase - compose_now_playing_frame skips
     drawing the ticker entirely when this is None, rather than holding it
-    static on screen. (During the *hold* phase, offset 0 is returned
+    static on screen. (During either *hold* phase, offset 0 is returned
     instead - that's deliberately drawn, not blanked, since the point is to
     show the readable start of the text.)
 
@@ -89,17 +96,32 @@ def compute_ticker_offset(
     """
     scroll_duration = max(strip_width - CANVAS_SIZE, 0) / scroll_speed_px_per_sec
 
-    if elapsed_seconds < hold_seconds:
-        return 0
+    # The first cycle (hold_seconds + scroll_duration, then blank for
+    # whatever's left of cycle_seconds) is handled separately from every
+    # cycle after it, since it uses a different, longer hold - otherwise
+    # the repeat hold would just stack on top of the first one instead of
+    # replacing it.
+    first_cycle_length = max(cycle_seconds, hold_seconds + scroll_duration)
+    if elapsed_seconds < first_cycle_length:
+        if elapsed_seconds < hold_seconds:
+            return 0
+        elapsed_in_scroll = elapsed_seconds - hold_seconds
+        if elapsed_in_scroll < scroll_duration:
+            return int(elapsed_in_scroll * scroll_speed_px_per_sec)
+        return None
 
-    # Everything after the one-time hold repeats on its own period, with no
-    # further holds - re-basing elapsed time to "time since the hold ended"
-    # keeps that repeat perfectly periodic instead of drifting.
-    elapsed_since_hold = elapsed_seconds - hold_seconds
-    period = max(cycle_seconds, scroll_duration)
-    elapsed_in_period = elapsed_since_hold % period
-    if elapsed_in_period < scroll_duration:
-        return int(elapsed_in_period * scroll_speed_px_per_sec)
+    # Every cycle after the first repeats on its own (shorter) period,
+    # holding for repeat_hold_seconds instead of hold_seconds before each
+    # scroll - re-basing elapsed time to "time since the first cycle ended"
+    # keeps the repeat perfectly periodic instead of drifting.
+    elapsed_since_first_cycle = elapsed_seconds - first_cycle_length
+    period = max(cycle_seconds, repeat_hold_seconds + scroll_duration)
+    elapsed_in_period = elapsed_since_first_cycle % period
+    if elapsed_in_period < repeat_hold_seconds:
+        return 0
+    elapsed_in_scroll = elapsed_in_period - repeat_hold_seconds
+    if elapsed_in_scroll < scroll_duration:
+        return int(elapsed_in_scroll * scroll_speed_px_per_sec)
     return None
 
 

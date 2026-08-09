@@ -218,6 +218,7 @@ def run(settings: Settings) -> None:
                     settings.scroll_speed_px_per_sec,
                     settings.spotify_ticker_cycle_seconds,
                     settings.spotify_ticker_hold_seconds,
+                    settings.spotify_ticker_repeat_hold_seconds,
                 )
                 frame = compose_now_playing_frame(
                     spotify_art_image, spotify_ticker_strip, offset_px, text_color=spotify_text_color

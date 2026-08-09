@@ -112,12 +112,13 @@ class Settings:
     spotify_poll_interval_seconds: float = 5.0
     spotify_fallback_seconds: float = 90.0  # how long to stay in Spotify mode after playback stops
     # How often the "Track - Artist" ticker scrolls through, and how long it
-    # sits static/readable before its first scroll for a given track (no
-    # hold on later repeats of the same track) - see
-    # tinyscreen.spotify_renderer.compute_ticker_offset for the hold-then-
-    # scroll-then-blank behavior this actually produces.
+    # sits static/readable before a scroll starts - a longer pause before a
+    # track's first scroll, a shorter one before each later repeat of the
+    # same track - see tinyscreen.spotify_renderer.compute_ticker_offset for
+    # the hold-then-scroll-then-blank behavior this actually produces.
     spotify_ticker_cycle_seconds: float = 60.0
-    spotify_ticker_hold_seconds: float = 1.5
+    spotify_ticker_hold_seconds: float = 0.9
+    spotify_ticker_repeat_hold_seconds: float = 0.2
 
     # Rendering.
     font_path: Path = PROJECT_ROOT / "assets" / "fonts" / "Silkscreen-Regular.ttf"
@@ -159,7 +160,8 @@ def load_settings(env_file: Path | None = None) -> Settings:
         spotify_poll_interval_seconds=_env_float("SPOTIFY_POLL_INTERVAL_SECONDS", 5.0),
         spotify_fallback_seconds=_env_float("SPOTIFY_FALLBACK_SECONDS", 90.0),
         spotify_ticker_cycle_seconds=_env_float("SPOTIFY_TICKER_CYCLE_SECONDS", 60.0),
-        spotify_ticker_hold_seconds=_env_float("SPOTIFY_TICKER_HOLD_SECONDS", 2.0),
+        spotify_ticker_hold_seconds=_env_float("SPOTIFY_TICKER_HOLD_SECONDS", 0.9),
+        spotify_ticker_repeat_hold_seconds=_env_float("SPOTIFY_TICKER_REPEAT_HOLD_SECONDS", 0.2),
         font_path=Path(
             _env_str(
                 "FONT_PATH", str(PROJECT_ROOT / "assets" / "fonts" / "Silkscreen-Regular.ttf")

@@ -129,15 +129,23 @@ def test_compute_ticker_offset_lets_a_long_scroll_finish_past_the_cycle_length()
 def test_compute_ticker_offset_scrolls_again_each_new_cycle():
     # 63s elapsed on a 60s cycle wraps to 3s into cycle #2 - should scroll
     # again exactly like 3s did in cycle #1, not stay blank forever.
+    # repeat_hold_seconds=0 isolates pure repeat-cycle scroll timing from
+    # the separate (shorter, non-zero by default) repeat-hold behavior
+    # tested below.
     assert (
         compute_ticker_offset(
-            63.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0, hold_seconds=0.0
+            63.0,
+            strip_width=200,
+            scroll_speed_px_per_sec=20.0,
+            cycle_seconds=60.0,
+            hold_seconds=0.0,
+            repeat_hold_seconds=0.0,
         )
         == 60
     )
 
 
-def test_compute_ticker_offset_holds_at_zero_before_scrolling():
+def test_compute_ticker_offset_holds_at_zero_before_the_first_scroll():
     # hold_seconds=2 -> anything before t=2 should be the static, fully
     # readable start of the text (offset 0), not already moving.
     assert (
@@ -148,10 +156,11 @@ def test_compute_ticker_offset_holds_at_zero_before_scrolling():
     )
 
 
-def test_compute_ticker_offset_scrolls_after_the_hold_elapses():
+def test_compute_ticker_offset_scrolls_after_the_first_hold_elapses():
     # hold_seconds=2, scroll_duration=(200-64)/20=6.8 - at t=5 that's 3s
     # into the scroll phase (5 - 2), so offset should be 3*20=60, not
-    # measured from t=0 directly.
+    # measured from t=0 directly. Elapsed=5 is still within the first
+    # cycle, so the (unrelated, shorter) repeat hold never comes into play.
     assert (
         compute_ticker_offset(
             5.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0, hold_seconds=2.0
@@ -160,20 +169,45 @@ def test_compute_ticker_offset_scrolls_after_the_hold_elapses():
     )
 
 
-def test_compute_ticker_offset_does_not_hold_on_later_cycles():
-    # Regression test: the hold is a once-only pause for the very first
-    # scroll of a track, not a static beat before every repeat - a hold on
-    # every cycle read as an odd stutter once you'd already seen the title.
-    # cycle_seconds=10, hold_seconds=2, scroll_duration=6.8 -> first cycle
-    # is hold(0-2) + scroll(2-8.8) + blank(8.8-12), second cycle starts
-    # scrolling immediately at t=12 with no further hold. t=13 is 1s into
-    # that second scroll (not 1s into a second hold), so it should already
-    # be moving (offset=20), not sitting at the held 0.
+def test_compute_ticker_offset_holds_briefly_before_each_later_scroll():
+    # Per explicit request: a full-length hold on every repeat read as an
+    # odd stutter, but no hold at all made repeats start too abruptly - so
+    # later cycles get their own, shorter repeat_hold_seconds instead of
+    # hold_seconds. cycle_seconds=10, hold_seconds=2, scroll_duration=6.8
+    # -> first cycle is hold(0-2) + scroll(2-8.8) + blank(8.8-10), second
+    # cycle starts at t=10 with its own repeat_hold_seconds=0.5 pause
+    # (10-10.5) before scrolling again. t=10.3 is inside that repeat hold,
+    # so it should still be held at 0 - not yet moving, but also not held
+    # for the full 2s hold_seconds would-be window (see the next test).
     assert (
         compute_ticker_offset(
-            13.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=10.0, hold_seconds=2.0
+            10.3,
+            strip_width=200,
+            scroll_speed_px_per_sec=20.0,
+            cycle_seconds=10.0,
+            hold_seconds=2.0,
+            repeat_hold_seconds=0.5,
         )
-        == 20
+        == 0
+    )
+
+
+def test_compute_ticker_offset_repeat_hold_is_shorter_than_the_first_hold():
+    # Same setup as above, but t=11.0 - past the 0.5s repeat_hold_seconds
+    # (so scrolling should have started: 0.5s into the scroll = offset 10),
+    # even though it's well within what the *first* cycle's 2.0s
+    # hold_seconds would have held for. Proves the repeat cycle actually
+    # uses the shorter repeat_hold_seconds, not hold_seconds again.
+    assert (
+        compute_ticker_offset(
+            11.0,
+            strip_width=200,
+            scroll_speed_px_per_sec=20.0,
+            cycle_seconds=10.0,
+            hold_seconds=2.0,
+            repeat_hold_seconds=0.5,
+        )
+        == 10
     )
 
 
