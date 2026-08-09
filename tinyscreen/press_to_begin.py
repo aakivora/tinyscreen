@@ -17,8 +17,12 @@ from tinyscreen.renderer import BG_COLOR, CANVAS_SIZE, TEXT_COLOR, TEXT_FONT_SIZ
 
 logger = logging.getLogger("tinyscreen")
 
-LINE_SPACING = 3
+LINE_SPACING = 6  # doubled from the original 3px, per request
 ICON_SIZE = 10
+TRIANGLE_WIDTH = 8
+BAR_WIDTH = 2
+BAR_GAP = 2  # gap between the two vertical pause bars
+GROUP_GAP = 4  # gap between the play triangle and the pause bars
 
 
 def _crisp_measurer() -> ImageDraw.ImageDraw:
@@ -28,15 +32,28 @@ def _crisp_measurer() -> ImageDraw.ImageDraw:
 
 
 def _draw_play_icon(draw: ImageDraw.ImageDraw, center_x: int, center_y: int, size: int) -> None:
-    """A filled right-pointing triangle - the universal "play" symbol."""
+    """A play triangle followed by two vertical bars (like a play/pause
+    media control glyph), centered as one group at (center_x, center_y)."""
     half = size // 2
+    group_width = TRIANGLE_WIDTH + GROUP_GAP + BAR_WIDTH * 2 + BAR_GAP
+    left = center_x - group_width // 2
+
     draw.polygon(
         [
-            (center_x - half, center_y - half),
-            (center_x - half, center_y + half),
-            (center_x + half, center_y),
+            (left, center_y - half),
+            (left, center_y + half),
+            (left + TRIANGLE_WIDTH, center_y),
         ],
         fill=TEXT_COLOR,
+    )
+
+    bar1_left = left + TRIANGLE_WIDTH + GROUP_GAP
+    draw.rectangle(
+        (bar1_left, center_y - half, bar1_left + BAR_WIDTH - 1, center_y + half), fill=TEXT_COLOR
+    )
+    bar2_left = bar1_left + BAR_WIDTH + BAR_GAP
+    draw.rectangle(
+        (bar2_left, center_y - half, bar2_left + BAR_WIDTH - 1, center_y + half), fill=TEXT_COLOR
     )
 
 
