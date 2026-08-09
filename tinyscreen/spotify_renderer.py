@@ -29,6 +29,7 @@ TICKER_HEIGHT = 16
 TICKER_VERTICAL_SHIFT = 3
 
 TICKER_CYCLE_SECONDS = 60.0  # how often the ticker scrolls through - see compute_ticker_offset
+TICKER_HOLD_SECONDS = 2.0  # static readable pause before each scroll starts - see compute_ticker_offset
 
 
 def compute_ticker_offset(
@@ -36,31 +37,45 @@ def compute_ticker_offset(
     strip_width: int,
     scroll_speed_px_per_sec: float,
     cycle_seconds: float = TICKER_CYCLE_SECONDS,
+    hold_seconds: float = TICKER_HOLD_SECONDS,
 ) -> int | None:
-    """Scroll the ticker through once per cycle, then show nothing at all
+    """Hold the ticker static at its start (fully readable, offset 0) for
+    `hold_seconds`, then scroll it through once, then show nothing at all
     (just the album art, no text) for the rest of `cycle_seconds` - rather
     than scrolling nonstop for as long as something's playing. A typical
     2-4 minute track then shows the title/artist 2-4 times total instead
     of continuously - less visual clutter for something you're not
     actively trying to read start to finish, per request.
 
+    The hold exists because without it, a new track's ticker starts moving
+    the instant it's built - on real hardware, by the time you actually
+    see the switch happen (a few seconds of poll interval + album art
+    download latency), the first frame you see may already be a few pixels
+    into the scroll, cutting off the first letter or two before you ever
+    read them.
+
     Returns None during the blank phase - compose_now_playing_frame skips
     drawing the ticker entirely when this is None, rather than holding it
-    static on screen.
+    static on screen. (During the *hold* phase, offset 0 is returned
+    instead - that's deliberately drawn, not blanked, since the point is to
+    show the readable start of the text.)
 
     `cycle_seconds` is a *minimum* period, not a hard cutoff: if the text is
-    long enough that a full scroll-through takes longer than `cycle_seconds`
+    long enough that hold+scroll together take longer than `cycle_seconds`
     (a long "Track - Artist" string at the default speed easily can), the
-    scroll always runs to completion before going blank rather than being
-    truncated partway through and snapping back to the start - confirmed as
-    a bug in practice, where a long title would visibly cut off mid-scroll
-    and restart from the beginning instead of finishing its pass.
+    hold and scroll always run to completion before going blank rather than
+    being truncated partway through and snapping back to the start -
+    confirmed as a bug in practice, where a long title would visibly cut off
+    mid-scroll and restart from the beginning instead of finishing its pass.
     """
     scroll_duration = strip_width / scroll_speed_px_per_sec
-    period = max(cycle_seconds, scroll_duration)
+    period = max(cycle_seconds, hold_seconds + scroll_duration)
     elapsed_in_period = elapsed_seconds % period
-    if elapsed_in_period < scroll_duration:
-        return int(elapsed_in_period * scroll_speed_px_per_sec)
+    if elapsed_in_period < hold_seconds:
+        return 0
+    elapsed_in_scroll = elapsed_in_period - hold_seconds
+    if elapsed_in_scroll < scroll_duration:
+        return int(elapsed_in_scroll * scroll_speed_px_per_sec)
     return None
 
 

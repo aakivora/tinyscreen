@@ -69,15 +69,23 @@ def test_compose_now_playing_frame_black_text_is_actually_visible():
 
 def test_compute_ticker_offset_scrolls_at_the_start_of_the_cycle():
     # strip_width=200, speed=20px/s -> scroll_duration=10s, so 3s in should
-    # be mid-scroll at 3*20=60px.
-    assert compute_ticker_offset(3.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0) == 60
+    # be mid-scroll at 3*20=60px. hold_seconds=0 isolates pure scroll timing
+    # from the separate hold-phase behavior, tested below.
+    assert (
+        compute_ticker_offset(
+            3.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0, hold_seconds=0.0
+        )
+        == 60
+    )
 
 
 def test_compute_ticker_offset_is_none_after_the_scroll_finishes():
     # Same strip/speed as above (10s scroll), but 30s into a 60s cycle -
     # well past the scroll - should be the blank phase.
     assert (
-        compute_ticker_offset(30.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0)
+        compute_ticker_offset(
+            30.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0, hold_seconds=0.0
+        )
         is None
     )
 
@@ -90,7 +98,9 @@ def test_compute_ticker_offset_lets_a_long_scroll_finish_past_the_cycle_length()
     # mid-scroll instead of finishing the pass. It should still be
     # mid-scroll, uninterrupted, at the "actual" offset for elapsed=65.
     assert (
-        compute_ticker_offset(65.0, strip_width=2000, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0)
+        compute_ticker_offset(
+            65.0, strip_width=2000, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0, hold_seconds=0.0
+        )
         == 1300
     )
 
@@ -98,7 +108,35 @@ def test_compute_ticker_offset_lets_a_long_scroll_finish_past_the_cycle_length()
 def test_compute_ticker_offset_scrolls_again_each_new_cycle():
     # 63s elapsed on a 60s cycle wraps to 3s into cycle #2 - should scroll
     # again exactly like 3s did in cycle #1, not stay blank forever.
-    assert compute_ticker_offset(63.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0) == 60
+    assert (
+        compute_ticker_offset(
+            63.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0, hold_seconds=0.0
+        )
+        == 60
+    )
+
+
+def test_compute_ticker_offset_holds_at_zero_before_scrolling():
+    # hold_seconds=2 -> anything before t=2 should be the static, fully
+    # readable start of the text (offset 0), not already moving.
+    assert (
+        compute_ticker_offset(
+            1.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0, hold_seconds=2.0
+        )
+        == 0
+    )
+
+
+def test_compute_ticker_offset_scrolls_after_the_hold_elapses():
+    # hold_seconds=2, scroll_duration=10 (200/20) - at t=5 that's 3s into
+    # the scroll phase (5 - 2), so offset should be 3*20=60, not measured
+    # from t=0 directly.
+    assert (
+        compute_ticker_offset(
+            5.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0, hold_seconds=2.0
+        )
+        == 60
+    )
 
 
 def test_compose_now_playing_frame_with_none_offset_draws_no_ticker():
