@@ -1,23 +1,18 @@
-"""Alternate default/idle screen: a static "press play to begin" prompt, in
-place of the full weather/Spotify sentence idle mode - run via main2.py
-instead of main.py when you want this simpler screen instead.
+"""The "press to begin" idle screen: a static "PRESS <icon> TO BEGIN"
+prompt, one alternative for what tinyscreen.app shows when idle (the other
+being the default generated weather/mood sentence) - selected via
+IDLE_MODE=press_to_begin in .env. Spotify mode still takes over
+automatically either way; this only controls what shows when it isn't.
 """
 
 from __future__ import annotations
 
-import logging
-import time
-
 from PIL import Image, ImageDraw
 
-from tinyscreen.config import Settings
-from tinyscreen.display import create_matrix, push_frame
 from tinyscreen.fonts import get_font
 from tinyscreen.renderer import BG_COLOR, CANVAS_SIZE, TEXT_COLOR, TEXT_FONT_SIZE
 
-logger = logging.getLogger("tinyscreen")
-
-LINE_SPACING = 6  # doubled from the original 3px, per request
+LINE_SPACING = 6
 ICON_SIZE = 10
 TRIANGLE_WIDTH = 8
 BAR_WIDTH = 2
@@ -92,30 +87,3 @@ def build_press_to_begin_frame(font_path) -> Image.Image:
         y += height + LINE_SPACING
 
     return frame
-
-
-def run(settings: Settings) -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-
-    # Same lesson as tinyscreen.app.run: load the font before touching the
-    # matrix hardware - rgbmatrix's init breaks subsequent font-file opens
-    # on real hardware (confirmed empirically during hardware bring-up).
-    get_font(settings.font_path, TEXT_FONT_SIZE)
-
-    matrix = create_matrix(settings)
-    canvas = matrix.CreateFrameCanvas()
-
-    logger.info("tiny-screen (press-to-begin) starting (backend=%s)", settings.display_backend)
-
-    frame = build_press_to_begin_frame(settings.font_path)
-    canvas = push_frame(matrix, canvas, frame)
-
-    # Nothing animates, so there's no need to keep pushing frames - a single
-    # swap is enough, the hardware (or emulator) keeps displaying it.
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        logger.info("Shutting down")
-    finally:
-        matrix.Clear()

@@ -33,6 +33,7 @@ from datetime import datetime
 from tinyscreen.config import Settings
 from tinyscreen.display import create_matrix, push_frame
 from tinyscreen.fonts import get_font
+from tinyscreen.press_to_begin import build_press_to_begin_frame
 from tinyscreen.renderer import (
     TEXT_FONT_SIZE,
     VERTICAL_FONT_SIZE,
@@ -81,10 +82,17 @@ def run(settings: Settings) -> None:
         build_idle_strip, render_idle_frame = build_scroll_strip, scroll_frame
 
     logger.info(
-        "tiny-screen starting (backend=%s, idle_layout=%s, spotify=%s)",
+        "tiny-screen starting (backend=%s, idle_mode=%s, idle_layout=%s, spotify=%s)",
         settings.display_backend,
+        settings.idle_mode,
         settings.idle_layout,
         "enabled" if spotify_client else "disabled",
+    )
+
+    # The static screen doesn't need weather at all - built once up front,
+    # shown directly whenever idle mode is active, no polling thread.
+    press_to_begin_frame = (
+        build_press_to_begin_frame(settings.font_path) if settings.idle_mode == "press_to_begin" else None
     )
 
     state_lock = threading.Lock()
@@ -165,7 +173,8 @@ def run(settings: Settings) -> None:
 
             stop_event.wait(settings.spotify_poll_interval_seconds)
 
-    threading.Thread(target=poll_weather, daemon=True).start()
+    if press_to_begin_frame is None:
+        threading.Thread(target=poll_weather, daemon=True).start()
     if spotify_client is not None:
         threading.Thread(target=poll_spotify, daemon=True).start()
 
@@ -207,6 +216,8 @@ def run(settings: Settings) -> None:
                 frame = compose_now_playing_frame(
                     spotify_art_image, spotify_ticker_strip, offset_px, text_color=spotify_text_color
                 )
+            elif press_to_begin_frame is not None:
+                frame = press_to_begin_frame
             else:
                 if idle_strip is None:
                     time.sleep(settings.frame_interval_seconds)

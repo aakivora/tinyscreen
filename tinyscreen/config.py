@@ -87,8 +87,13 @@ class Settings:
     # regeneration requires a fresh weather reading anyway.
     weather_poll_interval_seconds: int = 900  # 15 minutes
 
-    # Idle-mode scrolling text.
-    idle_layout: str = "horizontal"  # "horizontal" (marquee) or "vertical" (credits-style)
+    # Idle mode: "sentence" (default, the generated weather/mood scrolling
+    # sentence) or "press_to_begin" (a static "PRESS <icon> TO BEGIN"
+    # screen, no weather polling at all). Either way, Spotify mode still
+    # takes over automatically when something's playing - this only
+    # controls what shows when it isn't.
+    idle_mode: str = "sentence"
+    idle_layout: str = "horizontal"  # "horizontal" (marquee) or "vertical" (credits-style) - sentence mode only
     scroll_speed_px_per_sec: float = 20.0
     frame_interval_seconds: float = 0.04  # ~25fps
 
@@ -134,6 +139,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         weather_lon=_env_optional_float("WEATHER_LON"),
         weather_city=os.environ.get("WEATHER_CITY") or None,
         weather_poll_interval_seconds=_env_int("WEATHER_POLL_INTERVAL_SECONDS", 900),
+        idle_mode=_env_str("IDLE_MODE", "sentence"),
         idle_layout=_env_str("IDLE_LAYOUT", "horizontal"),
         scroll_speed_px_per_sec=_env_float("SCROLL_SPEED_PX_PER_SEC", 20.0),
         frame_interval_seconds=_env_float("FRAME_INTERVAL_SECONDS", 0.04),
