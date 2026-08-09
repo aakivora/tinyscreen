@@ -47,11 +47,20 @@ def compute_ticker_offset(
     Returns None during the blank phase - compose_now_playing_frame skips
     drawing the ticker entirely when this is None, rather than holding it
     static on screen.
+
+    `cycle_seconds` is a *minimum* period, not a hard cutoff: if the text is
+    long enough that a full scroll-through takes longer than `cycle_seconds`
+    (a long "Track - Artist" string at the default speed easily can), the
+    scroll always runs to completion before going blank rather than being
+    truncated partway through and snapping back to the start - confirmed as
+    a bug in practice, where a long title would visibly cut off mid-scroll
+    and restart from the beginning instead of finishing its pass.
     """
-    elapsed_in_cycle = elapsed_seconds % cycle_seconds
     scroll_duration = strip_width / scroll_speed_px_per_sec
-    if elapsed_in_cycle < scroll_duration:
-        return int(elapsed_in_cycle * scroll_speed_px_per_sec)
+    period = max(cycle_seconds, scroll_duration)
+    elapsed_in_period = elapsed_seconds % period
+    if elapsed_in_period < scroll_duration:
+        return int(elapsed_in_period * scroll_speed_px_per_sec)
     return None
 
 

@@ -82,6 +82,19 @@ def test_compute_ticker_offset_is_none_after_the_scroll_finishes():
     )
 
 
+def test_compute_ticker_offset_lets_a_long_scroll_finish_past_the_cycle_length():
+    # Regression test: strip_width=2000 at 20px/s takes 100s to fully
+    # scroll - longer than the 60s cycle. The old implementation used
+    # cycle_seconds as a hard cutoff, so at 65s in it would wrap
+    # (65 % 60 = 5) and snap back to offset=100 - a visible jump backward
+    # mid-scroll instead of finishing the pass. It should still be
+    # mid-scroll, uninterrupted, at the "actual" offset for elapsed=65.
+    assert (
+        compute_ticker_offset(65.0, strip_width=2000, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0)
+        == 1300
+    )
+
+
 def test_compute_ticker_offset_scrolls_again_each_new_cycle():
     # 63s elapsed on a 60s cycle wraps to 3s into cycle #2 - should scroll
     # again exactly like 3s did in cycle #1, not stay blank forever.
