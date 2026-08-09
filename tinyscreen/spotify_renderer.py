@@ -18,10 +18,15 @@ from io import BytesIO
 import requests
 from PIL import Image, ImageOps
 
-from tinyscreen.renderer import BG_COLOR, CANVAS_SIZE, TEXT_COLOR, build_scroll_strip, scroll_frame
+from tinyscreen.renderer import CANVAS_SIZE, TEXT_COLOR, build_scroll_strip, scroll_frame
 
 TICKER_HEIGHT = 16
-TICKER_BAR_ALPHA = 160  # semi-transparent - lets a hint of the art show through behind the text
+# build_scroll_strip vertically centers text within a full CANVAS_SIZE-tall
+# strip, which (measured directly against the actual font) leaves a 5px gap
+# between the bottom of the glyphs and the canvas edge if the ticker band is
+# cropped from dead-center. Shifting the crop window up by this many pixels
+# tightens that to ~2px, sitting the text closer to the bottom edge.
+TICKER_VERTICAL_SHIFT = 3
 
 
 def download_album_art(url: str) -> Image.Image:
@@ -62,19 +67,14 @@ def compose_now_playing_frame(
     # build_scroll_strip always vertically centers its text within a full
     # CANVAS_SIZE-tall strip - the same math as its own baseline_y - so this
     # is where that text actually lands, regardless of TICKER_HEIGHT.
-    band_top = (CANVAS_SIZE - TICKER_HEIGHT) // 2
+    band_top = (CANVAS_SIZE - TICKER_HEIGHT) // 2 - TICKER_VERTICAL_SHIFT
     ticker_frame = scroll_frame(ticker_strip, offset_px)
     band = ticker_frame.crop((0, band_top, CANVAS_SIZE, band_top + TICKER_HEIGHT))
 
-    bar_region = frame.crop((0, CANVAS_SIZE - TICKER_HEIGHT, CANVAS_SIZE, CANVAS_SIZE)).convert("RGBA")
-    dimmer = Image.new("RGBA", (CANVAS_SIZE, TICKER_HEIGHT), (*BG_COLOR, TICKER_BAR_ALPHA))
-    dimmed_bar = Image.alpha_composite(bar_region, dimmer).convert("RGB")
-
-    # Paste only the ticker's text pixels (not its black background) over
-    # the dimmed art, so the "art visible through a translucent bar" look
-    # survives instead of the strip's own solid black blotting it out.
+    # Paste only the ticker's text pixels (not its black background) directly
+    # over the album art, no dimming - lets the full art show through behind
+    # the text rather than sitting under a darkened bar.
     text_mask = band.convert("L").point(lambda pixel: 255 if pixel > 40 else 0)
-    dimmed_bar.paste(band, (0, 0), text_mask)
+    frame.paste(band, (0, CANVAS_SIZE - TICKER_HEIGHT), text_mask)
 
-    frame.paste(dimmed_bar, (0, CANVAS_SIZE - TICKER_HEIGHT))
     return frame
