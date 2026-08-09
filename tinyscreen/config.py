@@ -112,11 +112,12 @@ class Settings:
     spotify_poll_interval_seconds: float = 5.0
     spotify_fallback_seconds: float = 90.0  # how long to stay in Spotify mode after playback stops
     # How often the "Track - Artist" ticker scrolls through, and how long it
-    # sits static/readable before each scroll starts - see
+    # sits static/readable before its first scroll for a given track (no
+    # hold on later repeats of the same track) - see
     # tinyscreen.spotify_renderer.compute_ticker_offset for the hold-then-
     # scroll-then-blank behavior this actually produces.
     spotify_ticker_cycle_seconds: float = 60.0
-    spotify_ticker_hold_seconds: float = 2.0
+    spotify_ticker_hold_seconds: float = 1.5
 
     # Rendering.
     font_path: Path = PROJECT_ROOT / "assets" / "fonts" / "Silkscreen-Regular.ttf"

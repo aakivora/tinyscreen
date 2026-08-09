@@ -29,7 +29,10 @@ TICKER_HEIGHT = 16
 TICKER_VERTICAL_SHIFT = 3
 
 TICKER_CYCLE_SECONDS = 60.0  # how often the ticker scrolls through - see compute_ticker_offset
-TICKER_HOLD_SECONDS = 2.0  # static readable pause before each scroll starts - see compute_ticker_offset
+# Static readable pause before the *first* scroll of a track only - see
+# compute_ticker_offset. Held at .5s less than the original 2.0s: on real
+# hardware even 2s read as a bit sluggish once you knew what was coming.
+TICKER_HOLD_SECONDS = 1.5
 
 
 def compute_ticker_offset(
@@ -40,12 +43,15 @@ def compute_ticker_offset(
     hold_seconds: float = TICKER_HOLD_SECONDS,
 ) -> int | None:
     """Hold the ticker static at its start (fully readable, offset 0) for
-    `hold_seconds`, then scroll it through once, then show nothing at all
-    (just the album art, no text) for the rest of `cycle_seconds` - rather
-    than scrolling nonstop for as long as something's playing. A typical
-    2-4 minute track then shows the title/artist 2-4 times total instead
-    of continuously - less visual clutter for something you're not
-    actively trying to read start to finish, per request.
+    `hold_seconds` exactly once - the very first scroll after `elapsed_seconds`
+    starts counting from a track change - then scroll it through, then show
+    nothing at all (just the album art, no text) for the rest of
+    `cycle_seconds`, then repeat the scroll-then-blank cycle with no further
+    holds. A typical 2-4 minute track then shows the title/artist 2-4 times
+    total instead of continuously - less visual clutter for something you're
+    not actively trying to read start to finish, per request. The hold is
+    once-only per request: repeating it on every cycle read as an odd stutter
+    once you'd already seen the title once.
 
     The hold exists because without it, a new track's ticker starts moving
     the instant it's built - on real hardware, by the time you actually
@@ -61,12 +67,12 @@ def compute_ticker_offset(
     show the readable start of the text.)
 
     `cycle_seconds` is a *minimum* period, not a hard cutoff: if the text is
-    long enough that hold+scroll together take longer than `cycle_seconds`
-    (a long "Track - Artist" string at the default speed easily can), the
-    hold and scroll always run to completion before going blank rather than
-    being truncated partway through and snapping back to the start -
-    confirmed as a bug in practice, where a long title would visibly cut off
-    mid-scroll and restart from the beginning instead of finishing its pass.
+    long enough that a scroll takes longer than `cycle_seconds` (a long
+    "Track - Artist" string at the default speed easily can), the scroll
+    always runs to completion before going blank rather than being
+    truncated partway through and snapping back to the start - confirmed as
+    a bug in practice, where a long title would visibly cut off mid-scroll
+    and restart from the beginning instead of finishing its pass.
 
     `strip_width` includes the trailing one-screen-width gap
     build_scroll_strip always adds after the text (see its docstring) - that
@@ -82,13 +88,18 @@ def compute_ticker_offset(
     trailing CANVAS_SIZE gap) has cleared, not the padded strip.
     """
     scroll_duration = max(strip_width - CANVAS_SIZE, 0) / scroll_speed_px_per_sec
-    period = max(cycle_seconds, hold_seconds + scroll_duration)
-    elapsed_in_period = elapsed_seconds % period
-    if elapsed_in_period < hold_seconds:
+
+    if elapsed_seconds < hold_seconds:
         return 0
-    elapsed_in_scroll = elapsed_in_period - hold_seconds
-    if elapsed_in_scroll < scroll_duration:
-        return int(elapsed_in_scroll * scroll_speed_px_per_sec)
+
+    # Everything after the one-time hold repeats on its own period, with no
+    # further holds - re-basing elapsed time to "time since the hold ended"
+    # keeps that repeat perfectly periodic instead of drifting.
+    elapsed_since_hold = elapsed_seconds - hold_seconds
+    period = max(cycle_seconds, scroll_duration)
+    elapsed_in_period = elapsed_since_hold % period
+    if elapsed_in_period < scroll_duration:
+        return int(elapsed_in_period * scroll_speed_px_per_sec)
     return None
 
 

@@ -149,14 +149,31 @@ def test_compute_ticker_offset_holds_at_zero_before_scrolling():
 
 
 def test_compute_ticker_offset_scrolls_after_the_hold_elapses():
-    # hold_seconds=2, scroll_duration=10 (200/20) - at t=5 that's 3s into
-    # the scroll phase (5 - 2), so offset should be 3*20=60, not measured
-    # from t=0 directly.
+    # hold_seconds=2, scroll_duration=(200-64)/20=6.8 - at t=5 that's 3s
+    # into the scroll phase (5 - 2), so offset should be 3*20=60, not
+    # measured from t=0 directly.
     assert (
         compute_ticker_offset(
             5.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0, hold_seconds=2.0
         )
         == 60
+    )
+
+
+def test_compute_ticker_offset_does_not_hold_on_later_cycles():
+    # Regression test: the hold is a once-only pause for the very first
+    # scroll of a track, not a static beat before every repeat - a hold on
+    # every cycle read as an odd stutter once you'd already seen the title.
+    # cycle_seconds=10, hold_seconds=2, scroll_duration=6.8 -> first cycle
+    # is hold(0-2) + scroll(2-8.8) + blank(8.8-12), second cycle starts
+    # scrolling immediately at t=12 with no further hold. t=13 is 1s into
+    # that second scroll (not 1s into a second hold), so it should already
+    # be moving (offset=20), not sitting at the held 0.
+    assert (
+        compute_ticker_offset(
+            13.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=10.0, hold_seconds=2.0
+        )
+        == 20
     )
 
 
