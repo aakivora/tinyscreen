@@ -8,6 +8,7 @@ from tinyscreen.renderer import CANVAS_SIZE
 from tinyscreen.spotify_renderer import (
     build_ticker_strip,
     compose_now_playing_frame,
+    compute_ticker_offset,
     download_album_art,
     pick_ticker_text_color,
 )
@@ -64,6 +65,38 @@ def test_compose_now_playing_frame_black_text_is_actually_visible():
     frame = compose_now_playing_frame(art, ticker, offset_px=0, text_color=(0, 0, 0))
 
     assert (0, 0, 0) in set(frame.getdata())
+
+
+def test_compute_ticker_offset_scrolls_at_the_start_of_the_cycle():
+    # strip_width=200, speed=20px/s -> scroll_duration=10s, so 3s in should
+    # be mid-scroll at 3*20=60px.
+    assert compute_ticker_offset(3.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0) == 60
+
+
+def test_compute_ticker_offset_is_none_after_the_scroll_finishes():
+    # Same strip/speed as above (10s scroll), but 30s into a 60s cycle -
+    # well past the scroll - should be the blank phase.
+    assert (
+        compute_ticker_offset(30.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0)
+        is None
+    )
+
+
+def test_compute_ticker_offset_scrolls_again_each_new_cycle():
+    # 63s elapsed on a 60s cycle wraps to 3s into cycle #2 - should scroll
+    # again exactly like 3s did in cycle #1, not stay blank forever.
+    assert compute_ticker_offset(63.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0) == 60
+
+
+def test_compose_now_playing_frame_with_none_offset_draws_no_ticker():
+    # offset_px=None is the ticker's blank phase - just the album art, no
+    # text pixels at all (as opposed to holding the ticker static onscreen).
+    art = Image.new("RGB", (300, 300), (230, 210, 60))
+    ticker = build_ticker_strip("Some Song", "Some Artist", FONT_PATH)
+
+    frame = compose_now_playing_frame(art, ticker, offset_px=None, text_color=(0, 0, 0))
+
+    assert (0, 0, 0) not in set(frame.getdata())
 
 
 def test_download_album_art_returns_rgb_image():

@@ -111,6 +111,10 @@ class Settings:
     spotify_token_cache_path: Path = PROJECT_ROOT / ".cache" / "spotify_token.json"
     spotify_poll_interval_seconds: float = 5.0
     spotify_fallback_seconds: float = 90.0  # how long to stay in Spotify mode after playback stops
+    # How often the "Track - Artist" ticker scrolls through - see
+    # tinyscreen.spotify_renderer.compute_ticker_offset for the scroll-once-
+    # then-hold behavior this actually produces.
+    spotify_ticker_cycle_seconds: float = 60.0
 
     # Rendering.
     font_path: Path = PROJECT_ROOT / "assets" / "fonts" / "Silkscreen-Regular.ttf"
@@ -151,6 +155,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         ),
         spotify_poll_interval_seconds=_env_float("SPOTIFY_POLL_INTERVAL_SECONDS", 5.0),
         spotify_fallback_seconds=_env_float("SPOTIFY_FALLBACK_SECONDS", 90.0),
+        spotify_ticker_cycle_seconds=_env_float("SPOTIFY_TICKER_CYCLE_SECONDS", 60.0),
         font_path=Path(
             _env_str(
                 "FONT_PATH", str(PROJECT_ROOT / "assets" / "fonts" / "Silkscreen-Regular.ttf")

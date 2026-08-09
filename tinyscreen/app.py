@@ -48,6 +48,7 @@ from tinyscreen.spotify_client import build_spotify_client, should_show_spotify
 from tinyscreen.spotify_renderer import (
     build_ticker_strip,
     compose_now_playing_frame,
+    compute_ticker_offset,
     download_album_art,
     pick_ticker_text_color,
 )
@@ -210,8 +211,12 @@ def run(settings: Settings) -> None:
                 current_mode = new_mode
 
             if show_spotify:
-                offset_px = int(
-                    (time.monotonic() - spotify_strip_started_at) * settings.scroll_speed_px_per_sec
+                elapsed = time.monotonic() - spotify_strip_started_at
+                offset_px = compute_ticker_offset(
+                    elapsed,
+                    spotify_ticker_strip.width,
+                    settings.scroll_speed_px_per_sec,
+                    settings.spotify_ticker_cycle_seconds,
                 )
                 frame = compose_now_playing_frame(
                     spotify_art_image, spotify_ticker_strip, offset_px, text_color=spotify_text_color

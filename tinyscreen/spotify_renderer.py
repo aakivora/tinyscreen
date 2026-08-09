@@ -28,6 +28,32 @@ TICKER_HEIGHT = 16
 # tightens that to ~2px, sitting the text closer to the bottom edge.
 TICKER_VERTICAL_SHIFT = 3
 
+TICKER_CYCLE_SECONDS = 60.0  # how often the ticker scrolls through - see compute_ticker_offset
+
+
+def compute_ticker_offset(
+    elapsed_seconds: float,
+    strip_width: int,
+    scroll_speed_px_per_sec: float,
+    cycle_seconds: float = TICKER_CYCLE_SECONDS,
+) -> int | None:
+    """Scroll the ticker through once per cycle, then show nothing at all
+    (just the album art, no text) for the rest of `cycle_seconds` - rather
+    than scrolling nonstop for as long as something's playing. A typical
+    2-4 minute track then shows the title/artist 2-4 times total instead
+    of continuously - less visual clutter for something you're not
+    actively trying to read start to finish, per request.
+
+    Returns None during the blank phase - compose_now_playing_frame skips
+    drawing the ticker entirely when this is None, rather than holding it
+    static on screen.
+    """
+    elapsed_in_cycle = elapsed_seconds % cycle_seconds
+    scroll_duration = strip_width / scroll_speed_px_per_sec
+    if elapsed_in_cycle < scroll_duration:
+        return int(elapsed_in_cycle * scroll_speed_px_per_sec)
+    return None
+
 
 def download_album_art(url: str) -> Image.Image:
     response = requests.get(url, timeout=10)
@@ -85,10 +111,15 @@ def build_ticker_strip(track_name: str, artist_name: str, font_path) -> Image.Im
 def compose_now_playing_frame(
     art_image: Image.Image,
     ticker_strip: Image.Image,
-    offset_px: int,
+    offset_px: int | None,
     text_color: tuple[int, int, int] = TEXT_COLOR,
 ) -> Image.Image:
     frame = _fit_album_art(art_image)
+
+    # None means "blank phase" of the ticker cycle (see
+    # compute_ticker_offset) - just the art, no text drawn at all.
+    if offset_px is None:
+        return frame
 
     # build_scroll_strip always vertically centers its text within a full
     # CANVAS_SIZE-tall strip - the same math as its own baseline_y - so this
