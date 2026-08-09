@@ -68,9 +68,10 @@ def test_compose_now_playing_frame_black_text_is_actually_visible():
 
 
 def test_compute_ticker_offset_scrolls_at_the_start_of_the_cycle():
-    # strip_width=200, speed=20px/s -> scroll_duration=10s, so 3s in should
-    # be mid-scroll at 3*20=60px. hold_seconds=0 isolates pure scroll timing
-    # from the separate hold-phase behavior, tested below.
+    # strip_width=200 (CANVAS_SIZE=64 of that is the trailing gap, so
+    # scroll_duration is (200-64)/20=6.8s), so 3s in should be mid-scroll at
+    # 3*20=60px. hold_seconds=0 isolates pure scroll timing from the
+    # separate hold-phase behavior, tested below.
     assert (
         compute_ticker_offset(
             3.0, strip_width=200, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0, hold_seconds=0.0
@@ -80,7 +81,7 @@ def test_compute_ticker_offset_scrolls_at_the_start_of_the_cycle():
 
 
 def test_compute_ticker_offset_is_none_after_the_scroll_finishes():
-    # Same strip/speed as above (10s scroll), but 30s into a 60s cycle -
+    # Same strip/speed as above (6.8s scroll), but 30s into a 60s cycle -
     # well past the scroll - should be the blank phase.
     assert (
         compute_ticker_offset(
@@ -90,9 +91,29 @@ def test_compute_ticker_offset_is_none_after_the_scroll_finishes():
     )
 
 
+def test_compute_ticker_offset_stops_once_the_text_itself_clears_the_screen():
+    # Regression test: strip_width includes a trailing CANVAS_SIZE(64)-wide
+    # gap that build_scroll_strip always adds for idle mode's continuous
+    # loop. The old implementation used the full strip_width as the scroll
+    # cutoff, so after the text visually cleared the screen it kept
+    # scrolling through that entire trailing gap - during which
+    # scroll_frame's own wraparound started sliding the *next* copy of the
+    # text back in from the right (a visible "second roll") - before
+    # finally cutting to blank mid-way through that reappearance. It should
+    # go blank as soon as the text itself (264-64=200px at 20px/s = 10s)
+    # has cleared, not the full strip (264px = 13.2s) - 11s in is past the
+    # text's own exit but still within the old, buggy cutoff.
+    assert (
+        compute_ticker_offset(
+            11.0, strip_width=264, scroll_speed_px_per_sec=20.0, cycle_seconds=60.0, hold_seconds=0.0
+        )
+        is None
+    )
+
+
 def test_compute_ticker_offset_lets_a_long_scroll_finish_past_the_cycle_length():
-    # Regression test: strip_width=2000 at 20px/s takes 100s to fully
-    # scroll - longer than the 60s cycle. The old implementation used
+    # Regression test: strip_width=2000 at 20px/s takes (2000-64)/20=96.8s
+    # to fully scroll - longer than the 60s cycle. The old implementation used
     # cycle_seconds as a hard cutoff, so at 65s in it would wrap
     # (65 % 60 = 5) and snap back to offset=100 - a visible jump backward
     # mid-scroll instead of finishing the pass. It should still be

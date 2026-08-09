@@ -67,8 +67,21 @@ def compute_ticker_offset(
     being truncated partway through and snapping back to the start -
     confirmed as a bug in practice, where a long title would visibly cut off
     mid-scroll and restart from the beginning instead of finishing its pass.
+
+    `strip_width` includes the trailing one-screen-width gap
+    build_scroll_strip always adds after the text (see its docstring) - that
+    gap exists so idle mode's continuous loop doesn't read as the sentence
+    smashing into its own start, but it means "scroll until offset ==
+    strip_width" runs a whole screen-width past the point the text has
+    actually cleared the screen. Confirmed as a second bug in practice: the
+    text would visibly finish exiting, then the loop's *next* copy of the
+    text would start sliding back in from the right (scroll_frame's own
+    wraparound), and only then get cut off mid-way through that
+    reappearance - a visible "second roll" that stops partway through. The
+    scroll instead stops as soon as the text itself (strip_width minus that
+    trailing CANVAS_SIZE gap) has cleared, not the padded strip.
     """
-    scroll_duration = strip_width / scroll_speed_px_per_sec
+    scroll_duration = max(strip_width - CANVAS_SIZE, 0) / scroll_speed_px_per_sec
     period = max(cycle_seconds, hold_seconds + scroll_duration)
     elapsed_in_period = elapsed_seconds % period
     if elapsed_in_period < hold_seconds:
