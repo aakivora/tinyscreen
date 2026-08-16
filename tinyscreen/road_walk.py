@@ -84,8 +84,14 @@ CENTERLINE_DASH_OFF_GU = 0.4
 # native resolution - the same "supersample then downsample" trick used
 # nowhere else in this codebase yet, needed here because grid-unit stroke
 # widths like 0.16 are sub-pixel at native resolution and would either
-# vanish or look jagged without it.
-SUPERSAMPLE = 4
+# vanish or look jagged without it. Was 4 - confirmed via phase-transition
+# timestamp logging that the per-frame LANCZOS downsample cost of a 4x
+# (256x256) canvas badly overran the signature/fade phases' configured
+# durations on the Pi Zero W's single-core chip (up to ~26x over, far
+# worse than the ~1.5-1.9x measured on a Mac) even after the incremental
+# per-segment road drawing fix. Halving this roughly halves that
+# downsample cost.
+SUPERSAMPLE = 2
 
 # Facing (-1/1) is derived from a smoothed (EMA) horizontal-velocity sign
 # rather than the raw per-frame value, so a path that dips briefly near-
