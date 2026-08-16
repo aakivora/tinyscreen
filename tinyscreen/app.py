@@ -239,7 +239,7 @@ def run(settings: Settings) -> None:
                 road_walk_state = step_road_walk(
                     road_walk_state, settings.frame_interval_seconds, settings, road_walk_rng
                 )
-                frame = render_road_walk_frame(road_walk_state)
+                frame = render_road_walk_frame(road_walk_state, settings.font_path)
             else:
                 if idle_strip is None:
                     time.sleep(settings.frame_interval_seconds)

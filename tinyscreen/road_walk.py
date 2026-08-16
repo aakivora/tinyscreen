@@ -18,12 +18,13 @@ side effect makes every function here testable with plain floats, no clock
 mocking needed at all.
 
 State is a plain dict (matching app.py's existing idle_state/spotify_state
-convention) moving through three phases: "waiting" (board dark, timer
+convention) moving through four phases: "waiting" (board dark, timer
 counting up to the next walk) -> "walking" (the walk itself, sampling one
-path point per frame) -> "fading" (walker gone, road holds then dims to
-black) -> back to "waiting". The timer for the next walk only starts once
-"fading" completes, so a slow walk's fade-out never overlaps the next walk
-starting.
+path point per frame) -> "signature" (walker gone, road holds solid, the
+"WE MAKE THE ROAD BY WALKING" text flashes on top of it) -> "fading" (road
+and text dim to black together) -> back to "waiting". The timer for the
+next walk only starts once "fading" completes, so a slow walk's fade-out
+never overlaps the next walk starting.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ from typing import Any
 
 from PIL import Image, ImageDraw
 
+from tinyscreen.fonts import get_font
 from tinyscreen.renderer import CANVAS_SIZE
 
 # --- walker body proportions, in "grid units" (== native board pixels) ---
@@ -91,6 +93,15 @@ SUPERSAMPLE = 4
 # walk speed produces.
 FACING_EMA_ALPHA = 0.15
 FACING_DEADZONE = 0.03
+
+# --- "signature" phase: the road holds solid once the walker exits, then
+# this text flashes on top of it before both fade to black together ---
+SIGNATURE_LINES = ("WE MAKE", "THE ROAD", "BY WALKING")
+SIGNATURE_FONT_SIZE = 6  # ~6-7% of CANVAS_SIZE per line, per spec
+SIGNATURE_LINE_SPACING = 1
+SIGNATURE_TEXT_COLOR = (255, 255, 255)
+SIGNATURE_OUTLINE_COLOR = (0, 0, 0)
+SIGNATURE_STROKE_WIDTH = 1  # dark outline behind each line, for legibility over bright road sections
 
 EDGES = ("top", "right", "bottom", "left")
 
@@ -270,10 +281,16 @@ def step_road_walk(state: dict[str, Any], dt: float, settings: Any, rng: random.
         }
 
         if is_off_board(new_px, new_py) and elapsed_in_phase >= settings.road_walk_min_walk_seconds:
-            new_state["phase"] = "fading"
+            new_state["phase"] = "signature"
             new_state["elapsed_in_phase"] = 0.0
 
         return new_state
+
+    if phase == "signature":
+        elapsed = state["elapsed_in_phase"] + dt
+        if elapsed >= settings.road_walk_signature_seconds:
+            return {**state, "phase": "fading", "elapsed_in_phase": 0.0, "fade_alpha": 1.0}
+        return {**state, "elapsed_in_phase": elapsed}
 
     if phase == "fading":
         elapsed = state["elapsed_in_phase"] + dt
@@ -350,7 +367,37 @@ def _scale_point_around(point: tuple[float, float], anchor: tuple[float, float],
     return (anchor[0] + (point[0] - anchor[0]) * scale, anchor[1] + (point[1] - anchor[1]) * scale)
 
 
-def render_road_walk_frame(state: dict[str, Any]) -> Image.Image:
+def _draw_signature_text(frame: Image.Image, font_path, brightness_scale: float) -> None:
+    """The "WE MAKE / THE ROAD / BY WALKING" flash - drawn directly at
+    native resolution (no supersampling, same reasoning as the walker:
+    Silkscreen is designed to stay crisp at exactly this pixel count, see
+    tinyscreen/fonts.py). A stroke_width outline keeps it legible over
+    bright road sections without needing a separate shadow layer."""
+    font = get_font(font_path, SIGNATURE_FONT_SIZE)
+    draw = ImageDraw.Draw(frame)
+    draw.fontmode = "1"
+
+    boxes = [draw.textbbox((0, 0), line, font=font) for line in SIGNATURE_LINES]
+    line_heights = [bottom - top for _, top, _, bottom in boxes]
+    total_height = sum(line_heights) + SIGNATURE_LINE_SPACING * (len(SIGNATURE_LINES) - 1)
+
+    fill = tuple(round(channel * max(0.0, min(1.0, brightness_scale))) for channel in SIGNATURE_TEXT_COLOR)
+
+    y = (CANVAS_SIZE - total_height) // 2
+    for line, (left, top, right, _bottom), line_height in zip(SIGNATURE_LINES, boxes, line_heights):
+        x = (CANVAS_SIZE - (right - left)) // 2 - left
+        draw.text(
+            (x, y - top),
+            line,
+            font=font,
+            fill=fill,
+            stroke_width=SIGNATURE_STROKE_WIDTH,
+            stroke_fill=SIGNATURE_OUTLINE_COLOR,
+        )
+        y += line_height + SIGNATURE_LINE_SPACING
+
+
+def render_road_walk_frame(state: dict[str, Any], font_path) -> Image.Image:
     # The road is drawn supersampled then LANCZOS-downsampled - the soft
     # antialiasing is exactly what a "glowing" road wants. The walker is
     # drawn separately, directly at native resolution with no downsampling
@@ -402,5 +449,8 @@ def render_road_walk_frame(state: dict[str, Any]) -> Image.Image:
             ),
             fill=WALKER_COLOR,
         )
+
+    if state["phase"] in ("signature", "fading"):
+        _draw_signature_text(frame, font_path, fade_alpha)
 
     return frame

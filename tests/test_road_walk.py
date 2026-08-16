@@ -1,5 +1,6 @@
 import math
 import random
+from pathlib import Path
 
 from tinyscreen.config import Settings
 from tinyscreen.renderer import CANVAS_SIZE
@@ -14,6 +15,8 @@ from tinyscreen.road_walk import (
     step_position,
     step_road_walk,
 )
+
+FONT_PATH = Path(__file__).resolve().parent.parent / "assets" / "fonts" / "Silkscreen-Regular.ttf"
 
 
 def _edges_of_point(point: tuple[float, float], size: float) -> set[str]:
@@ -160,7 +163,7 @@ def test_step_road_walk_does_not_end_the_walk_before_min_walk_seconds_even_off_b
     assert state["phase"] == "walking"  # still walking - too early to end despite being off board
 
 
-def test_step_road_walk_ends_the_walk_after_min_walk_seconds_when_off_board():
+def test_step_road_walk_enters_signature_after_min_walk_seconds_when_off_board():
     settings = Settings(
         road_walk_interval_seconds=0.0,
         road_walk_min_walk_seconds=0.5,
@@ -173,6 +176,27 @@ def test_step_road_walk_ends_the_walk_after_min_walk_seconds_when_off_board():
     assert state["phase"] == "walking"
 
     state = step_road_walk(state, 0.6, settings, rng)  # elapsed_in_phase=0.6 >= min_walk_seconds=0.5
+    assert state["phase"] == "signature"
+    assert state["elapsed_in_phase"] == 0.0
+    assert state["fade_alpha"] == 1.0
+
+
+def test_step_road_walk_signature_holds_until_signature_seconds_elapse():
+    settings = Settings(road_walk_signature_seconds=1.0)
+    rng = random.Random(6)
+    state = {**initial_road_walk_state(), "phase": "signature", "elapsed_in_phase": 0.0, "fade_alpha": 1.0}
+
+    state = step_road_walk(state, 0.5, settings, rng)
+    assert state["phase"] == "signature"
+    assert math.isclose(state["elapsed_in_phase"], 0.5)
+
+
+def test_step_road_walk_signature_transitions_to_fading_after_signature_seconds():
+    settings = Settings(road_walk_signature_seconds=1.0)
+    rng = random.Random(7)
+    state = {**initial_road_walk_state(), "phase": "signature", "elapsed_in_phase": 0.9, "fade_alpha": 1.0}
+
+    state = step_road_walk(state, 0.2, settings, rng)  # elapsed_in_phase would reach 1.1 >= 1.0
     assert state["phase"] == "fading"
     assert state["elapsed_in_phase"] == 0.0
     assert state["fade_alpha"] == 1.0
@@ -211,13 +235,13 @@ def test_step_road_walk_returns_to_waiting_once_fade_completes():
 
 
 def test_render_road_walk_frame_returns_canvas_sized_rgb_image():
-    frame = render_road_walk_frame(initial_road_walk_state())
+    frame = render_road_walk_frame(initial_road_walk_state(), FONT_PATH)
     assert frame.size == (CANVAS_SIZE, CANVAS_SIZE)
     assert frame.mode == "RGB"
 
 
 def test_render_road_walk_frame_is_black_when_path_is_empty():
-    frame = render_road_walk_frame(initial_road_walk_state())
+    frame = render_road_walk_frame(initial_road_walk_state(), FONT_PATH)
     assert set(frame.getdata()) == {(0, 0, 0)}
 
 
@@ -233,5 +257,56 @@ def test_render_road_walk_frame_draws_something_when_a_path_exists():
         "facing": 1,
         "gait_phase": 0.5,
     }
-    frame = render_road_walk_frame(state)
+    frame = render_road_walk_frame(state, FONT_PATH)
     assert any(pixel != (0, 0, 0) for pixel in frame.getdata())
+
+
+def test_render_road_walk_frame_draws_no_walker_during_signature():
+    # The walker should be gone as soon as the walk ends - only the road
+    # (and, separately, the signature text) should still be visible. The
+    # walker is drawn at a fixed, un-faded white regardless of fade_alpha
+    # (it's only ever drawn while phase=="walking", where alpha is always
+    # 1.0 anyway) - using a fade_alpha < 1.0 here means the signature
+    # text's own white comes out scaled (not exactly 255,255,255), so an
+    # exact (255,255,255) pixel can only mean a leftover walker, not text.
+    walking_state = {
+        **initial_road_walk_state(),
+        "phase": "walking",
+        "path": [(10.0, 10.0), (30.0, 40.0)],
+        "hue": 120.0,
+        "fade_alpha": 1.0,
+        "px": 30.0,
+        "py": 40.0,
+        "facing": 1,
+        "gait_phase": 0.5,
+    }
+    signature_state = {**walking_state, "phase": "signature", "fade_alpha": 0.5}
+
+    walking_pixels = set(render_road_walk_frame(walking_state, FONT_PATH).getdata())
+    signature_pixels = set(render_road_walk_frame(signature_state, FONT_PATH).getdata())
+    assert (255, 255, 255) in walking_pixels  # solid white walker while walking
+    assert (255, 255, 255) not in signature_pixels  # no walker once signature starts
+
+
+def test_render_road_walk_frame_draws_signature_text_with_no_road_present():
+    # An empty path isolates the text from any road pixels, so this
+    # confirms the text itself renders during "signature"/"fading" - not
+    # just that *something* (e.g. leftover road) is on screen.
+    for phase, fade_alpha in (("signature", 1.0), ("fading", 0.5)):
+        state = {**initial_road_walk_state(), "phase": phase, "path": [], "fade_alpha": fade_alpha}
+        frame = render_road_walk_frame(state, FONT_PATH)
+        assert any(pixel != (0, 0, 0) for pixel in frame.getdata())
+
+
+def test_render_road_walk_frame_draws_no_text_outside_signature_and_fading():
+    for phase in ("waiting", "walking"):
+        state = {
+            **initial_road_walk_state(),
+            "phase": phase,
+            "path": [],
+            "fade_alpha": 1.0,
+            "px": -100.0,  # off-canvas, so a "walking" walker doesn't draw either
+            "py": -100.0,
+        }
+        frame = render_road_walk_frame(state, FONT_PATH)
+        assert set(frame.getdata()) == {(0, 0, 0)}
