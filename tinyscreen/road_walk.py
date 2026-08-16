@@ -50,8 +50,9 @@ SHOULDER_Y_OFFSET = 3.2
 HEAD_Y_OFFSET = 4.1
 HEAD_RADIUS = 0.6
 LEG_SWING_FACTOR = 0.85
-ARM_SWING_FACTOR = 0.6
-ARM_Y_OFFSET = 1.3  # hand y = shoulderY + this
+ARM_SWING_FACTOR = 1.3  # was 0.6 - arms read as short/stocky at the old reach
+ARM_Y_OFFSET = 1.4  # was 1.3 - hand y = shoulderY + this; kept just above HIP_Y_OFFSET
+# so the hand doesn't drop into the same vertical band as the legs and blend with them
 LEAN_FACTOR = 0.12  # forward lean of shoulder/head, in x
 LIMB_WIDTH = 0.42  # legs + torso stroke width
 ARM_WIDTH = 0.3

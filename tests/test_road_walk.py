@@ -5,6 +5,8 @@ from pathlib import Path
 from tinyscreen.config import Settings
 from tinyscreen.renderer import CANVAS_SIZE
 from tinyscreen.road_walk import (
+    ARM_SWING_FACTOR,
+    ARM_Y_OFFSET,
     compute_facing,
     compute_gait_pose,
     compute_heading,
@@ -85,13 +87,20 @@ def test_compute_facing_flips_once_past_the_deadzone():
 
 
 def test_compute_gait_pose_matches_the_reference_formulas():
+    # Leg/torso/head constants are an exact, unscaled transcription of the
+    # reference prototype's formulas. Arm reach (swing factor + y offset)
+    # was deliberately tuned away from the reference afterward - the
+    # literal reference values (0.6, 1.3) made the arms read as short and
+    # stocky on real hardware - so those two are checked against
+    # road_walk's own constants rather than hardcoded reference numbers.
     px, py, facing, gait_phase = 10.0, 20.0, 1, math.pi / 4
     pose = compute_gait_pose(px, py, facing, gait_phase)
 
     swing = math.sin(gait_phase) * facing
     hip_y, shoulder_y, head_y = py - 1.8, py - 3.2, py - 4.1
     left_foot_x, right_foot_x = px + swing * 0.85, px - swing * 0.85
-    left_hand_x, right_hand_x = px - swing * 0.6, px + swing * 0.6
+    left_hand_x = px - swing * ARM_SWING_FACTOR
+    right_hand_x = px + swing * ARM_SWING_FACTOR
     lean = facing * 0.12
 
     def assert_point_close(actual, expected):
@@ -105,9 +114,9 @@ def test_compute_gait_pose_matches_the_reference_formulas():
     assert_point_close(pose["torso"][0], (px + lean, shoulder_y))
     assert_point_close(pose["torso"][1], (px, hip_y))
     assert_point_close(pose["arm1"][0], (px + lean, shoulder_y))
-    assert_point_close(pose["arm1"][1], (left_hand_x, shoulder_y + 1.3))
+    assert_point_close(pose["arm1"][1], (left_hand_x, shoulder_y + ARM_Y_OFFSET))
     assert_point_close(pose["arm2"][0], (px + lean, shoulder_y))
-    assert_point_close(pose["arm2"][1], (right_hand_x, shoulder_y + 1.3))
+    assert_point_close(pose["arm2"][1], (right_hand_x, shoulder_y + ARM_Y_OFFSET))
     assert_point_close(pose["head_center"], (px + lean, head_y))
     assert pose["head_radius"] == 0.6
 
