@@ -56,6 +56,15 @@ ARM_WIDTH = 0.3
 GAIT_PHASE_PER_PIXEL = 1.0  # gaitPhase += distance_moved * this - ties stride to distance, not wall-clock time
 WALKER_COLOR = (255, 255, 255)
 
+# Scales the walker up at DRAW time only (around its own px,py anchor) -
+# compute_gait_pose() itself stays an unscaled, exact transcription of the
+# reference formulas above. Confirmed on real hardware that the literal
+# reference proportions were too small to read as a stick figure at all
+# (limbs collapsing to sub-pixel-wide antialiased smudges) - this is a
+# separate, purely visual tuning knob for legibility, not a correction to
+# the reference math itself.
+WALKER_RENDER_SCALE = 2.2
+
 # --- road/centerline rendering, in grid units - exact values from the
 # reference prototype (HSLA road-bed/centerline + dash pattern) ---
 ROAD_BED_SATURATION = 0.55
@@ -337,10 +346,23 @@ def _draw_dashed_polyline(
         cumulative += segment_length
 
 
+def _scale_point_around(point: tuple[float, float], anchor: tuple[float, float], scale: float) -> tuple[float, float]:
+    return (anchor[0] + (point[0] - anchor[0]) * scale, anchor[1] + (point[1] - anchor[1]) * scale)
+
+
 def render_road_walk_frame(state: dict[str, Any]) -> Image.Image:
+    # The road is drawn supersampled then LANCZOS-downsampled - the soft
+    # antialiasing is exactly what a "glowing" road wants. The walker is
+    # drawn separately, directly at native resolution with no downsampling
+    # at all - confirmed on real hardware that going through the same
+    # blur pipeline made a figure this small unreadable as a stick figure
+    # (a handful of already-thin limbs all going soft and merging into a
+    # blob) rather than a road, the same "antialiasing reads as mush at
+    # this pixel count" lesson this codebase already learned for text (see
+    # renderer.py's build_scroll_strip docstring).
     working_size = CANVAS_SIZE * SUPERSAMPLE
-    canvas = Image.new("RGB", (working_size, working_size), (0, 0, 0))
-    draw = ImageDraw.Draw(canvas)
+    road_canvas = Image.new("RGB", (working_size, working_size), (0, 0, 0))
+    road_draw = ImageDraw.Draw(road_canvas)
 
     path = state["path"]
     fade_alpha = state["fade_alpha"]
@@ -348,26 +370,30 @@ def render_road_walk_frame(state: dict[str, Any]) -> Image.Image:
     if len(path) >= 2 and fade_alpha > 0:
         scaled_path = [(x * SUPERSAMPLE, y * SUPERSAMPLE) for x, y in path]
         road_color = _hsl_color(state["hue"], ROAD_BED_SATURATION, ROAD_BED_LIGHTNESS, fade_alpha)
-        _draw_stroked_polyline(draw, scaled_path, ROAD_BED_WIDTH_GU * SUPERSAMPLE, road_color)
+        _draw_stroked_polyline(road_draw, scaled_path, ROAD_BED_WIDTH_GU * SUPERSAMPLE, road_color)
 
         centerline_color = _hsl_color(state["hue"], CENTERLINE_SATURATION, CENTERLINE_LIGHTNESS, fade_alpha)
         _draw_dashed_polyline(
-            draw, path, CENTERLINE_DASH_ON_GU, CENTERLINE_DASH_OFF_GU, CENTERLINE_WIDTH_GU, centerline_color, SUPERSAMPLE
+            road_draw, path, CENTERLINE_DASH_ON_GU, CENTERLINE_DASH_OFF_GU, CENTERLINE_WIDTH_GU, centerline_color, SUPERSAMPLE
         )
 
+    frame = road_canvas.resize((CANVAS_SIZE, CANVAS_SIZE), Image.LANCZOS)
+
     if state["phase"] == "walking":
+        anchor = (state["px"], state["py"])
         pose = compute_gait_pose(state["px"], state["py"], state["facing"], state["gait_phase"])
+        frame_draw = ImageDraw.Draw(frame)
 
         def scaled(point: tuple[float, float]) -> tuple[float, float]:
-            return (point[0] * SUPERSAMPLE, point[1] * SUPERSAMPLE)
+            return _scale_point_around(point, anchor, WALKER_RENDER_SCALE)
 
         for part, width in (("leg1", LIMB_WIDTH), ("leg2", LIMB_WIDTH), ("torso", LIMB_WIDTH), ("arm1", ARM_WIDTH), ("arm2", ARM_WIDTH)):
             start, end = pose[part]
-            _draw_stroked_polyline(draw, [scaled(start), scaled(end)], width * SUPERSAMPLE, WALKER_COLOR)
+            _draw_stroked_polyline(frame_draw, [scaled(start), scaled(end)], width * WALKER_RENDER_SCALE, WALKER_COLOR)
 
         head_center = scaled(pose["head_center"])
-        head_radius = pose["head_radius"] * SUPERSAMPLE
-        draw.ellipse(
+        head_radius = pose["head_radius"] * WALKER_RENDER_SCALE
+        frame_draw.ellipse(
             (
                 head_center[0] - head_radius,
                 head_center[1] - head_radius,
@@ -377,4 +403,4 @@ def render_road_walk_frame(state: dict[str, Any]) -> Image.Image:
             fill=WALKER_COLOR,
         )
 
-    return canvas.resize((CANVAS_SIZE, CANVAS_SIZE), Image.LANCZOS)
+    return frame
