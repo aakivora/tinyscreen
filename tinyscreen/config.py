@@ -88,14 +88,30 @@ class Settings:
     weather_poll_interval_seconds: int = 900  # 15 minutes
 
     # Idle mode: "sentence" (default, the generated weather/mood scrolling
-    # sentence) or "press_to_begin" (a static "PRESS <icon> TO BEGIN"
-    # screen, no weather polling at all). Either way, Spotify mode still
-    # takes over automatically when something's playing - this only
-    # controls what shows when it isn't.
+    # sentence), "press_to_begin" (a static "PRESS <icon> TO BEGIN" screen),
+    # or "road_walk" (a generative "we make the road by walking" animation -
+    # see tinyscreen/road_walk.py). None of these poll weather except
+    # "sentence". Either way, Spotify mode still takes over automatically
+    # when something's playing - this only controls what shows when it isn't.
     idle_mode: str = "sentence"
     idle_layout: str = "horizontal"  # "horizontal" (marquee) or "vertical" (credits-style) - sentence mode only
     scroll_speed_px_per_sec: float = 20.0
     frame_interval_seconds: float = 0.04  # ~25fps
+
+    # road_walk idle mode - see tinyscreen/road_walk.py's module docstring
+    # for the phase state machine these drive. Visual-design constants
+    # (road/centerline colors, dash pattern, walker body proportions) live
+    # as plain constants in that module instead, matching how
+    # renderer.CATEGORY_COLORS isn't env-configurable either - these here
+    # are the ones worth tuning without a code change.
+    road_walk_interval_seconds: float = 300.0  # one walk per ~5 minutes
+    road_walk_min_walk_seconds: float = 4.0  # don't end a walk before this even if it's crossed the boundary
+    road_walk_fade_seconds: float = 1.0
+    road_walk_speed_px_per_sec: float = 9.0  # targets an ~8-15s walk end to end
+    road_walk_wander_amp_1: float = 0.6  # radians - broad heading sweep
+    road_walk_wander_freq_1: float = 0.05  # radians per pixel traveled
+    road_walk_wander_amp_2: float = 0.2  # radians - finer heading wobble
+    road_walk_wander_freq_2: float = 0.18  # radians per pixel traveled
 
     # Spotify. spotify_client_id/secret are None until you register an app -
     # tinyscreen/spotify_client.py's build_spotify_client() returns None
@@ -151,6 +167,14 @@ def load_settings(env_file: Path | None = None) -> Settings:
         idle_layout=_env_str("IDLE_LAYOUT", "horizontal"),
         scroll_speed_px_per_sec=_env_float("SCROLL_SPEED_PX_PER_SEC", 20.0),
         frame_interval_seconds=_env_float("FRAME_INTERVAL_SECONDS", 0.04),
+        road_walk_interval_seconds=_env_float("ROAD_WALK_INTERVAL_SECONDS", 300.0),
+        road_walk_min_walk_seconds=_env_float("ROAD_WALK_MIN_WALK_SECONDS", 4.0),
+        road_walk_fade_seconds=_env_float("ROAD_WALK_FADE_SECONDS", 1.0),
+        road_walk_speed_px_per_sec=_env_float("ROAD_WALK_SPEED_PX_PER_SEC", 9.0),
+        road_walk_wander_amp_1=_env_float("ROAD_WALK_WANDER_AMP_1", 0.6),
+        road_walk_wander_freq_1=_env_float("ROAD_WALK_WANDER_FREQ_1", 0.05),
+        road_walk_wander_amp_2=_env_float("ROAD_WALK_WANDER_AMP_2", 0.2),
+        road_walk_wander_freq_2=_env_float("ROAD_WALK_WANDER_FREQ_2", 0.18),
         spotify_client_id=os.environ.get("SPOTIFY_CLIENT_ID") or None,
         spotify_client_secret=os.environ.get("SPOTIFY_CLIENT_SECRET") or None,
         spotify_redirect_uri=_env_str("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8901/callback"),

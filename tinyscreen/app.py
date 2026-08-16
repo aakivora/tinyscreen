@@ -26,6 +26,7 @@ mode is active, so falling back to idle is instant rather than needing to
 from __future__ import annotations
 
 import logging
+import random
 import threading
 import time
 from datetime import datetime
@@ -43,6 +44,7 @@ from tinyscreen.renderer import (
     scroll_frame,
     vertical_scroll_frame,
 )
+from tinyscreen.road_walk import initial_road_walk_state, render_road_walk_frame, step_road_walk
 from tinyscreen.sentence import generate_sentence
 from tinyscreen.spotify_client import build_spotify_client, should_show_spotify
 from tinyscreen.spotify_renderer import (
@@ -95,6 +97,14 @@ def run(settings: Settings) -> None:
     press_to_begin_frame = (
         build_press_to_begin_frame(settings.font_path) if settings.idle_mode == "press_to_begin" else None
     )
+
+    # road_walk has no I/O and no background thread - it's advanced
+    # directly in the render loop below, only on frames where it's actually
+    # the mode being shown. See tinyscreen/road_walk.py's module docstring
+    # for why that's what makes the walk pause (rather than skip ahead)
+    # while Spotify mode is showing instead.
+    road_walk_state = initial_road_walk_state()
+    road_walk_rng = random.Random()
 
     state_lock = threading.Lock()
     stop_event = threading.Event()
@@ -174,7 +184,7 @@ def run(settings: Settings) -> None:
 
             stop_event.wait(settings.spotify_poll_interval_seconds)
 
-    if press_to_begin_frame is None:
+    if settings.idle_mode == "sentence":
         threading.Thread(target=poll_weather, daemon=True).start()
     if spotify_client is not None:
         threading.Thread(target=poll_spotify, daemon=True).start()
@@ -225,6 +235,11 @@ def run(settings: Settings) -> None:
                 )
             elif press_to_begin_frame is not None:
                 frame = press_to_begin_frame
+            elif settings.idle_mode == "road_walk":
+                road_walk_state = step_road_walk(
+                    road_walk_state, settings.frame_interval_seconds, settings, road_walk_rng
+                )
+                frame = render_road_walk_frame(road_walk_state)
             else:
                 if idle_strip is None:
                     time.sleep(settings.frame_interval_seconds)
