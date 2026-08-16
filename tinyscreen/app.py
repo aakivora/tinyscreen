@@ -236,9 +236,12 @@ def run(settings: Settings) -> None:
             elif press_to_begin_frame is not None:
                 frame = press_to_begin_frame
             elif settings.idle_mode == "road_walk":
+                previous_road_walk_phase = road_walk_state["phase"]
                 road_walk_state = step_road_walk(
                     road_walk_state, settings.frame_interval_seconds, settings, road_walk_rng
                 )
+                if road_walk_state["phase"] != previous_road_walk_phase:
+                    logger.info("road_walk: %s -> %s", previous_road_walk_phase, road_walk_state["phase"])
                 frame = render_road_walk_frame(road_walk_state, settings.font_path)
             else:
                 if idle_strip is None:

@@ -1,5 +1,6 @@
 import math
 import random
+import time
 from pathlib import Path
 
 from tinyscreen.config import Settings
@@ -254,18 +255,31 @@ def test_render_road_walk_frame_is_black_when_path_is_empty():
     assert set(frame.getdata()) == {(0, 0, 0)}
 
 
-def test_render_road_walk_frame_draws_something_when_a_path_exists():
-    state = {
-        **initial_road_walk_state(),
-        "phase": "walking",
-        "path": [(10.0, 10.0), (30.0, 40.0), (50.0, 20.0)],
-        "hue": 120.0,
-        "fade_alpha": 1.0,
-        "px": 50.0,
-        "py": 20.0,
-        "facing": 1,
-        "gait_phase": 0.5,
-    }
+def _walk_a_few_steps(settings: Settings, rng_seed: int, n_steps: int = 5, step_dt: float = 0.2) -> dict:
+    """Builds a realistic "walking" state (including a real, incrementally-
+    drawn road_layer - see _draw_road_segment) by actually running the
+    state machine, rather than hand-crafting a fake "path" list - path
+    alone hasn't driven rendering since the incremental-road-drawing
+    rework, so a test relying on it wouldn't actually exercise the current
+    rendering code at all."""
+    rng = random.Random(rng_seed)
+    state = step_road_walk(initial_road_walk_state(), 0.0, settings, rng)
+    for _ in range(n_steps):
+        state = step_road_walk(state, step_dt, settings, rng)
+    return state
+
+
+def test_render_road_walk_frame_draws_the_road_from_a_real_walk():
+    settings = Settings(
+        road_walk_interval_seconds=0.0,
+        road_walk_min_walk_seconds=999.0,  # never let it exit mid-test
+        road_walk_speed_px_per_sec=5.0,
+        road_walk_wander_amp_1=0.0,
+        road_walk_wander_amp_2=0.0,
+    )
+    state = _walk_a_few_steps(settings, rng_seed=20)
+    assert state["road_layer"] is not None
+
     frame = render_road_walk_frame(state, FONT_PATH)
     assert any(pixel != (0, 0, 0) for pixel in frame.getdata())
 
@@ -278,23 +292,50 @@ def test_render_road_walk_frame_draws_no_walker_during_signature():
     # 1.0 anyway) - using a fade_alpha < 1.0 here means the signature
     # text's own white comes out scaled (not exactly 255,255,255), so an
     # exact (255,255,255) pixel can only mean a leftover walker, not text.
-    walking_state = {
-        **initial_road_walk_state(),
-        "phase": "walking",
-        "path": [(10.0, 10.0), (30.0, 40.0)],
-        "hue": 120.0,
-        "fade_alpha": 1.0,
-        "px": 30.0,
-        "py": 40.0,
-        "facing": 1,
-        "gait_phase": 0.5,
-    }
+    settings = Settings(
+        road_walk_interval_seconds=0.0,
+        road_walk_min_walk_seconds=999.0,
+        road_walk_speed_px_per_sec=5.0,
+        road_walk_wander_amp_1=0.0,
+        road_walk_wander_amp_2=0.0,
+    )
+    walking_state = _walk_a_few_steps(settings, rng_seed=21)
     signature_state = {**walking_state, "phase": "signature", "fade_alpha": 0.5}
 
     walking_pixels = set(render_road_walk_frame(walking_state, FONT_PATH).getdata())
     signature_pixels = set(render_road_walk_frame(signature_state, FONT_PATH).getdata())
     assert (255, 255, 255) in walking_pixels  # solid white walker while walking
     assert (255, 255, 255) not in signature_pixels  # no walker once signature starts
+
+
+def test_render_road_walk_frame_stays_fast_as_the_path_grows():
+    # Regression test for a real performance bug found on hardware: the
+    # original implementation redrew the *entire* path from scratch every
+    # frame, which measurably slowed down over the course of a walk and
+    # badly inflated the real-world (not simulated) duration of every
+    # later phase - a nominal 0.6s "signature" phase measured at ~1s
+    # wall-clock even on a fast Mac. render_road_walk_frame should cost
+    # about the same whether the path has a few points or a few hundred.
+    settings = Settings(
+        road_walk_interval_seconds=0.0,
+        road_walk_min_walk_seconds=999.0,
+        road_walk_speed_px_per_sec=5.0,
+        road_walk_wander_amp_1=0.0,
+        road_walk_wander_amp_2=0.0,
+    )
+    short_state = _walk_a_few_steps(settings, rng_seed=22, n_steps=2, step_dt=0.02)
+    start = time.perf_counter()
+    render_road_walk_frame(short_state, FONT_PATH)
+    short_path_seconds = time.perf_counter() - start
+
+    long_state = _walk_a_few_steps(settings, rng_seed=22, n_steps=300, step_dt=0.02)
+    start = time.perf_counter()
+    render_road_walk_frame(long_state, FONT_PATH)
+    long_path_seconds = time.perf_counter() - start
+
+    # Generous margin - a regression guard against O(path length) growth,
+    # not a tight performance benchmark.
+    assert long_path_seconds < short_path_seconds * 5 + 0.05
 
 
 def test_render_road_walk_frame_draws_signature_text_with_no_road_present():

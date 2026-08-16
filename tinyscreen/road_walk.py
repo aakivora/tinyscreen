@@ -206,6 +206,7 @@ def initial_road_walk_state() -> dict[str, Any]:
         "phase": "waiting",
         "elapsed_in_phase": 0.0,
         "path": [],
+        "road_layer": None,
         "hue": 0.0,
         "px": 0.0,
         "py": 0.0,
@@ -226,6 +227,7 @@ def _start_new_walk(rng: random.Random) -> dict[str, Any]:
         "phase": "walking",
         "elapsed_in_phase": 0.0,
         "path": [start],
+        "road_layer": _new_road_layer(),
         "hue": rng.uniform(0, 360),
         "px": start[0],
         "py": start[1],
@@ -267,6 +269,11 @@ def step_road_walk(state: dict[str, Any], dt: float, settings: Any, rng: random.
         dx_ema = FACING_EMA_ALPHA * (new_px - state["px"]) + (1 - FACING_EMA_ALPHA) * state["dx_ema"]
         elapsed_in_phase = state["elapsed_in_phase"] + dt
 
+        road_layer = state["road_layer"]
+        _draw_road_segment(
+            road_layer, (state["px"], state["py"]), (new_px, new_py), state["distance_traveled"], state["hue"]
+        )
+
         new_state = {
             **state,
             "px": new_px,
@@ -278,6 +285,7 @@ def step_road_walk(state: dict[str, Any], dt: float, settings: Any, rng: random.
             "gait_phase": state["gait_phase"] + distance_moved * GAIT_PHASE_PER_PIXEL,
             "elapsed_in_phase": elapsed_in_phase,
             "path": [*state["path"], (new_px, new_py)],
+            "road_layer": road_layer,
             "fade_alpha": 1.0,
         }
 
@@ -330,38 +338,59 @@ def _draw_stroked_polyline(
     _draw_round_cap(draw, points[-1], radius, color)
 
 
-def _draw_dashed_polyline(
-    draw: ImageDraw.ImageDraw,
-    path_gu: list[tuple[float, float]],
-    dash_on_gu: float,
-    dash_off_gu: float,
-    width_gu: float,
-    color,
-    supersample: int,
+def _new_road_layer() -> Image.Image:
+    working_size = CANVAS_SIZE * SUPERSAMPLE
+    return Image.new("RGB", (working_size, working_size), (0, 0, 0))
+
+
+def _draw_road_segment(
+    road_layer: Image.Image,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    cumulative_distance_before: float,
+    hue: float,
 ) -> None:
-    """Hand-rolled dashing: PIL's ImageDraw.line has no native dash
-    support. Walks the path's cumulative arc length (in grid units, so the
-    dash pattern's spacing doesn't depend on the supersample factor) and
-    only draws the "on" sub-segments. Each frame-to-frame path segment is
-    treated as fully on or fully off based on the dash phase at its start
-    rather than precisely split at the exact on/off boundary - segments are
-    short enough (well under one dash length at typical walk speed) that
-    this reads as a clean dash at the board's actual pixel scale."""
-    if len(path_gu) < 2:
+    """Draws just the newest path segment onto the persistent, already-
+    supersampled `road_layer` - mutates it in place, O(1) per call
+    regardless of how long the walk has been going.
+
+    This replaced an earlier version that redrew the *entire* path from
+    scratch every single frame. That measurably slowed down as a walk
+    progressed (confirmed on real hardware via phase-transition logging:
+    a nominal 0.6s "signature" phase was taking ~1s wall-clock even on a
+    fast Mac, and the effect compounds much worse on the Pi's far weaker
+    chip) - badly inflating every phase's real-world duration well past
+    its configured seconds. This is the actual fix, not another timing
+    constant.
+
+    Always draws at full brightness - fading is applied once, cheaply, as
+    a single blend over the whole (small, fixed-size) downsampled frame
+    in render_road_walk_frame, rather than baked into every segment.
+
+    `cumulative_distance_before` is the walk's total distance traveled up
+    to (not including) this segment - needed to know where in the dashed
+    centerline's on/off cycle this specific segment falls, without having
+    to re-walk the whole path's history every time.
+    """
+    draw = ImageDraw.Draw(road_layer)
+    scaled_start = (start[0] * SUPERSAMPLE, start[1] * SUPERSAMPLE)
+    scaled_end = (end[0] * SUPERSAMPLE, end[1] * SUPERSAMPLE)
+
+    road_color = _hsl_color(hue, ROAD_BED_SATURATION, ROAD_BED_LIGHTNESS, 1.0)
+    _draw_stroked_polyline(draw, [scaled_start, scaled_end], ROAD_BED_WIDTH_GU * SUPERSAMPLE, road_color)
+
+    segment_length = math.hypot(end[0] - start[0], end[1] - start[1])
+    if segment_length <= 0:
         return
-    period = dash_on_gu + dash_off_gu
-    width_px = max(1, round(width_gu * supersample))
-    radius_px = width_px / 2
-    cumulative = 0.0
-    for (x0, y0), (x1, y1) in zip(path_gu, path_gu[1:]):
-        segment_length = math.hypot(x1 - x0, y1 - y0)
-        if segment_length > 0 and (cumulative % period) < dash_on_gu:
-            start = (x0 * supersample, y0 * supersample)
-            end = (x1 * supersample, y1 * supersample)
-            draw.line([start, end], fill=color, width=width_px)
-            _draw_round_cap(draw, start, radius_px, color)
-            _draw_round_cap(draw, end, radius_px, color)
-        cumulative += segment_length
+
+    period = CENTERLINE_DASH_ON_GU + CENTERLINE_DASH_OFF_GU
+    if (cumulative_distance_before % period) < CENTERLINE_DASH_ON_GU:
+        centerline_color = _hsl_color(hue, CENTERLINE_SATURATION, CENTERLINE_LIGHTNESS, 1.0)
+        width_px = max(1, round(CENTERLINE_WIDTH_GU * SUPERSAMPLE))
+        radius_px = width_px / 2
+        draw.line([scaled_start, scaled_end], fill=centerline_color, width=width_px)
+        _draw_round_cap(draw, scaled_start, radius_px, centerline_color)
+        _draw_round_cap(draw, scaled_end, radius_px, centerline_color)
 
 
 def _scale_point_around(point: tuple[float, float], anchor: tuple[float, float], scale: float) -> tuple[float, float]:
@@ -399,33 +428,31 @@ def _draw_signature_text(frame: Image.Image, font_path, brightness_scale: float)
 
 
 def render_road_walk_frame(state: dict[str, Any], font_path) -> Image.Image:
-    # The road is drawn supersampled then LANCZOS-downsampled - the soft
-    # antialiasing is exactly what a "glowing" road wants. The walker is
-    # drawn separately, directly at native resolution with no downsampling
-    # at all - confirmed on real hardware that going through the same
-    # blur pipeline made a figure this small unreadable as a stick figure
-    # (a handful of already-thin limbs all going soft and merging into a
-    # blob) rather than a road, the same "antialiasing reads as mush at
-    # this pixel count" lesson this codebase already learned for text (see
-    # renderer.py's build_scroll_strip docstring).
-    working_size = CANVAS_SIZE * SUPERSAMPLE
-    road_canvas = Image.new("RGB", (working_size, working_size), (0, 0, 0))
-    road_draw = ImageDraw.Draw(road_canvas)
-
-    path = state["path"]
+    # The road (state["road_layer"]) is built incrementally, one segment
+    # per step_road_walk() call - see _draw_road_segment. Here it's just
+    # downsampled (fixed cost, independent of how long the walk has been
+    # going) and, during "fading", dimmed with a single cheap blend over
+    # the whole small frame rather than re-computing per-segment colors.
+    road_layer = state.get("road_layer")
     fade_alpha = state["fade_alpha"]
 
-    if len(path) >= 2 and fade_alpha > 0:
-        scaled_path = [(x * SUPERSAMPLE, y * SUPERSAMPLE) for x, y in path]
-        road_color = _hsl_color(state["hue"], ROAD_BED_SATURATION, ROAD_BED_LIGHTNESS, fade_alpha)
-        _draw_stroked_polyline(road_draw, scaled_path, ROAD_BED_WIDTH_GU * SUPERSAMPLE, road_color)
+    if road_layer is not None:
+        downsampled_road = road_layer.resize((CANVAS_SIZE, CANVAS_SIZE), Image.LANCZOS)
+        if fade_alpha < 1.0:
+            black = Image.new("RGB", (CANVAS_SIZE, CANVAS_SIZE), (0, 0, 0))
+            frame = Image.blend(black, downsampled_road, max(0.0, fade_alpha))
+        else:
+            frame = downsampled_road
+    else:
+        frame = Image.new("RGB", (CANVAS_SIZE, CANVAS_SIZE), (0, 0, 0))
 
-        centerline_color = _hsl_color(state["hue"], CENTERLINE_SATURATION, CENTERLINE_LIGHTNESS, fade_alpha)
-        _draw_dashed_polyline(
-            road_draw, path, CENTERLINE_DASH_ON_GU, CENTERLINE_DASH_OFF_GU, CENTERLINE_WIDTH_GU, centerline_color, SUPERSAMPLE
-        )
-
-    frame = road_canvas.resize((CANVAS_SIZE, CANVAS_SIZE), Image.LANCZOS)
+    # The walker is drawn separately, directly at native resolution with
+    # no downsampling at all - confirmed on real hardware that going
+    # through the same blur pipeline as the road made a figure this small
+    # unreadable as a stick figure (a handful of already-thin limbs all
+    # going soft and merging into a blob), the same "antialiasing reads as
+    # mush at this pixel count" lesson this codebase already learned for
+    # text (see renderer.py's build_scroll_strip docstring).
 
     if state["phase"] == "walking":
         anchor = (state["px"], state["py"])
