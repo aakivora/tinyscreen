@@ -105,7 +105,7 @@ class Settings:
     # renderer.CATEGORY_COLORS isn't env-configurable either - these here
     # are the ones worth tuning without a code change.
     road_walk_interval_seconds: float = 300.0  # one walk per ~5 minutes
-    road_walk_min_walk_seconds: float = 4.0  # don't end a walk before this even if it's crossed the boundary
+    road_walk_min_walk_seconds: float = 0.8  # don't end a walk before this even if it's crossed the boundary
     road_walk_signature_seconds: float = 0.6  # "WE MAKE THE ROAD BY WALKING" flash, once the walker exits
     road_walk_fade_seconds: float = 0.4
     road_walk_speed_px_per_sec: float = 9.0  # targets an ~8-15s walk end to end
@@ -169,7 +169,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         scroll_speed_px_per_sec=_env_float("SCROLL_SPEED_PX_PER_SEC", 20.0),
         frame_interval_seconds=_env_float("FRAME_INTERVAL_SECONDS", 0.04),
         road_walk_interval_seconds=_env_float("ROAD_WALK_INTERVAL_SECONDS", 300.0),
-        road_walk_min_walk_seconds=_env_float("ROAD_WALK_MIN_WALK_SECONDS", 4.0),
+        road_walk_min_walk_seconds=_env_float("ROAD_WALK_MIN_WALK_SECONDS", 0.8),
         road_walk_signature_seconds=_env_float("ROAD_WALK_SIGNATURE_SECONDS", 0.6),
         road_walk_fade_seconds=_env_float("ROAD_WALK_FADE_SECONDS", 0.4),
         road_walk_speed_px_per_sec=_env_float("ROAD_WALK_SPEED_PX_PER_SEC", 9.0),
