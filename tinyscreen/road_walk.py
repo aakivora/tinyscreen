@@ -32,6 +32,7 @@ from __future__ import annotations
 import colorsys
 import math
 import random
+from functools import lru_cache
 from typing import Any
 
 from PIL import Image, ImageDraw
@@ -403,21 +404,30 @@ def _scale_point_around(point: tuple[float, float], anchor: tuple[float, float],
     return (anchor[0] + (point[0] - anchor[0]) * scale, anchor[1] + (point[1] - anchor[1]) * scale)
 
 
-def _draw_signature_text(frame: Image.Image, font_path, brightness_scale: float) -> None:
-    """The "WE MAKE / THE ROAD / BY WALKING" flash - drawn directly at
-    native resolution (no supersampling, same reasoning as the walker:
-    Silkscreen is designed to stay crisp at exactly this pixel count, see
-    tinyscreen/fonts.py). A stroke_width outline keeps it legible over
-    bright road sections without needing a separate shadow layer."""
+@lru_cache(maxsize=4)
+def _build_signature_layer(font_path) -> Image.Image:
+    """Pre-rendered once (cached by font_path) instead of every frame.
+
+    Confirmed via phase-transition timestamp logging on real hardware:
+    this was the actual dominant cost left in the "signature"/"fading"
+    phases after fixing the road's own rendering (those two phases were
+    still overrunning ~12-13x even after that fix, while "walking" -
+    which does the same road downsample every frame, just no text - was
+    not). PIL's `stroke_width` outline is significantly more expensive to
+    render than plain text, and this was doing it 3 times a frame for the
+    entire signature+fade duration. The text and its position never
+    change, only its overall opacity does (via fade_alpha) - so it's
+    rendered once as an RGBA layer here, and render_road_walk_frame just
+    alpha-composites it (cheap) each frame instead of redrawing it.
+    """
     font = get_font(font_path, SIGNATURE_FONT_SIZE)
-    draw = ImageDraw.Draw(frame)
+    layer = Image.new("RGBA", (CANVAS_SIZE, CANVAS_SIZE), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
     draw.fontmode = "1"
 
     boxes = [draw.textbbox((0, 0), line, font=font) for line in SIGNATURE_LINES]
     line_heights = [bottom - top for _, top, _, bottom in boxes]
     total_height = sum(line_heights) + SIGNATURE_LINE_SPACING * (len(SIGNATURE_LINES) - 1)
-
-    fill = tuple(round(channel * max(0.0, min(1.0, brightness_scale))) for channel in SIGNATURE_TEXT_COLOR)
 
     y = (CANVAS_SIZE - total_height) // 2
     for line, (left, top, right, _bottom), line_height in zip(SIGNATURE_LINES, boxes, line_heights):
@@ -426,11 +436,23 @@ def _draw_signature_text(frame: Image.Image, font_path, brightness_scale: float)
             (x, y - top),
             line,
             font=font,
-            fill=fill,
+            fill=(*SIGNATURE_TEXT_COLOR, 255),
             stroke_width=SIGNATURE_STROKE_WIDTH,
-            stroke_fill=SIGNATURE_OUTLINE_COLOR,
+            stroke_fill=(*SIGNATURE_OUTLINE_COLOR, 255),
         )
         y += line_height + SIGNATURE_LINE_SPACING
+
+    return layer
+
+
+def _draw_signature_text(frame: Image.Image, font_path, brightness_scale: float) -> None:
+    layer = _build_signature_layer(font_path)
+    scale = max(0.0, min(1.0, brightness_scale))
+    if scale < 1.0:
+        faded = layer.copy()
+        faded.putalpha(layer.getchannel("A").point(lambda alpha: round(alpha * scale)))
+        layer = faded
+    frame.paste(layer, (0, 0), layer)
 
 
 def render_road_walk_frame(state: dict[str, Any], font_path) -> Image.Image:
