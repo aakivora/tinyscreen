@@ -193,6 +193,7 @@ def run(settings: Settings) -> None:
 
     try:
         while True:
+            loop_started_at = time.monotonic()
             with state_lock:
                 idle_strip = idle_state["strip"]
                 idle_strip_started_at = idle_state["strip_started_at"]
@@ -253,7 +254,20 @@ def run(settings: Settings) -> None:
                 frame = render_idle_frame(idle_strip, offset_px)
 
             canvas = push_frame(matrix, canvas, frame)
-            time.sleep(settings.frame_interval_seconds)
+            # Unconditionally sleeping the full frame_interval_seconds here
+            # (regardless of how long the render+push work above actually
+            # took) meant real per-iteration time was work_seconds +
+            # frame_interval_seconds, not frame_interval_seconds - on real
+            # hardware, where push_frame's GPIO write is genuinely slow,
+            # this made every frame (in every mode) noticeably slower than
+            # the nominal ~25fps. Went unnoticed until road_walk, whose
+            # phase durations are the first thing in this app precise
+            # enough to expose it - confirmed via phase-transition
+            # timestamp logging on a Pi Zero W that this alone accounted
+            # for a consistent ~1.9x overrun even in road_walk's cheapest
+            # phase (a blank frame, no rendering at all).
+            work_seconds = time.monotonic() - loop_started_at
+            time.sleep(max(0.0, settings.frame_interval_seconds - work_seconds))
     except KeyboardInterrupt:
         logger.info("Shutting down")
     finally:
